@@ -1,0 +1,33 @@
+{
+  "name": "TsunamiBrainrot",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "$path": "src/ServerScriptService"
+    },
+    "ServerStorage": {
+      "$path": "src/ServerStorage",
+      "Brainrot": {
+        "$path": "Modelos/Brainrots"
+      },
+      "BrainrotBase": {
+        "$path": "Modelos/BaseBrainrot.rbxm"
+      },
+      "Shops": {
+        "$path": "Modelos/Shops.rbxm"
+      }
+    },
+    "StarterGui": {
+      "$path": "src/StarterGui"
+    },
+    "ReplicatedStorage": {
+      "$path": "src/shared"
+    },
+    "Workspace": {
+      "$className": "Workspace"
+    },
+    "StarterPlayer": {
+      "$path": "src/StarterPlayer"
+    }
+  }
+}

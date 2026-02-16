@@ -1,0 +1,332 @@
+-- PhysicalShopUI.client.lua
+-- Skill: zone-trigger-ui
+-- Description: Opens the Sell UI when standing in the "SellZone".
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Remotes
+local SellUnits = ReplicatedStorage:WaitForChild("SellUnits", 10)
+local GetInventory = ReplicatedStorage:WaitForChild("GetInventory", 10)
+
+-- Config
+local ZONE_RADIUS = 8 
+local TIER_COLORS = {
+    ["Common"] = Color3.fromRGB(200, 200, 200),
+    ["Rare"] = Color3.fromRGB(0, 170, 255),
+    ["Epic"] = Color3.fromRGB(170, 0, 255),
+    ["Legendary"] = Color3.fromRGB(255, 170, 0),
+    ["Mythic"] = Color3.fromRGB(255, 0, 85),
+    ["Divine"] = Color3.fromRGB(255, 255, 255)
+}
+
+-- Logic Vars
+local selectedUnits = {}
+local inventoryUnits = {}
+local wasInZone = false
+
+-- UI REFERENCES (Defined later)
+local mainFrame, uiScale, inventoryArea, invGrid, totalLabel, sellBtn
+
+-----------------------------------------------------------
+-- IMPLEMENTATIONS (Moved to Top for scope safety)
+-----------------------------------------------------------
+
+local function createViewportModel(parent, modelName, tier)
+    local viewport = Instance.new("ViewportFrame")
+    viewport.Size = UDim2.new(1, 0, 1, 0)
+    viewport.BackgroundTransparency = 1
+    viewport.ZIndex = 12
+    viewport.Parent = parent
+    
+    local models = ReplicatedStorage:FindFirstChild("BrainrotModels")
+    if not models then return end 
+    
+    for _, tierFolder in pairs(models:GetChildren()) do
+        local m = tierFolder:FindFirstChild(modelName)
+        if m then
+            local clone = m:Clone()
+            clone.Parent = viewport
+            local _, size = clone:GetBoundingBox()
+            local dist = math.max(size.X, size.Y, size.Z) * 1.5
+            local cam = Instance.new("Camera")
+            cam.CFrame = CFrame.new(Vector3.new(dist, dist*0.5, dist), Vector3.new(0,0,0))
+            cam.Parent = viewport
+            viewport.CurrentCamera = cam
+            return
+        end
+    end
+    
+    -- Fallback
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1,0,1,0)
+    t.BackgroundTransparency = 1
+    t.Text = "📦"
+    t.TextSize = 30
+    t.Parent = viewport
+end
+
+local function updateSummary()
+    if not totalLabel or not sellBtn then return end
+    local total = 0
+    local count = 0
+    for _, u in pairs(selectedUnits) do
+        -- Client estimate (Simplified)
+        local base = 50
+        if u.Tier == "Common" then base = 150 end
+        if u.Tier == "Rare" then base = 800 end
+        if u.Tier == "Epic" then base = 4500 end
+        if u.Tier == "Legendary" then base = 35000 end
+        if u.Tier == "Mythic" then base = 250000 end
+        
+        local mult = 1
+        if u.Shiny then mult = 3.5 end
+        total += math.floor(base * mult)
+        count += 1
+    end
+    
+    totalLabel.Text = "Total: $" .. tostring(total)
+    sellBtn.Text = count > 0 and ("VENDER ("..count..")") or "VENDER"
+    sellBtn.BackgroundColor3 = count > 0 and Color3.fromRGB(50,200,50) or Color3.fromRGB(80,80,80)
+end
+
+local function loadInventory()
+    if not inventoryArea then return end
+    -- Clear
+    for _, c in pairs(inventoryArea:GetChildren()) do
+        if c:IsA("Frame") or c:IsA("TextButton") then c:Destroy() end
+    end
+    selectedUnits = {}
+    updateSummary()
+    
+    inventoryUnits = GetInventory:InvokeServer() or {}
+    print("[PhysicalShopUI] Loaded " .. #inventoryUnits .. " units from server.")
+    
+    for _, unit in ipairs(inventoryUnits) do
+        local btn = Instance.new("TextButton")
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        btn.ZIndex = 12
+        btn.Text = ""
+        btn.Parent = inventoryArea
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = btn
+        
+        -- Safe Tier Access
+        local tier = unit.Tier or "Common"
+        local color = TIER_COLORS[tier] or Color3.new(1,1,1)
+        
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = color
+        stroke.Thickness = 2
+        stroke.Parent = btn
+        
+        local preview = Instance.new("Frame")
+        preview.Size = UDim2.new(1,-10,1,-30)
+        preview.Position = UDim2.new(0,5,0,5)
+        preview.BackgroundTransparency = 1
+        preview.Parent = btn
+        createViewportModel(preview, unit.Name, unit.Tier)
+        
+        local name = Instance.new("TextLabel")
+        name.Size = UDim2.new(1,0,0,20)
+        name.Position = UDim2.new(0,0,1,-22)
+        name.BackgroundTransparency = 1
+        name.Text = unit.Name:sub(1,14)
+        name.TextColor3 = color
+        name.TextSize = 9
+        name.Font = Enum.Font.GothamBold
+        name.Parent = btn
+        
+        local check = Instance.new("TextLabel")
+        check.Size = UDim2.new(0,20,0,20)
+        check.Position = UDim2.new(1,-22,0,2)
+        check.BackgroundColor3 = Color3.fromRGB(50,255,50)
+        check.Text = "✓"
+        check.Visible = false
+        check.ZIndex = 14
+        check.Parent = btn
+        Instance.new("UICorner", check).CornerRadius = UDim.new(1,0)
+        
+        btn.MouseButton1Click:Connect(function()
+            local uid = unit.Id or unit.UUID
+            if not uid then return end
+            
+            if selectedUnits[uid] then
+                selectedUnits[uid] = nil
+                check.Visible = false
+                btn.BackgroundColor3 = Color3.fromRGB(40,40,50)
+            else
+                selectedUnits[uid] = unit
+                check.Visible = true
+                btn.BackgroundColor3 = Color3.fromRGB(60,80,60)
+            end
+            updateSummary()
+        end)
+    end
+end
+
+local function openUI()
+    if not mainFrame or mainFrame.Visible then return end
+    mainFrame.Visible = true
+    loadInventory()
+    
+    local tween = TweenService:Create(uiScale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1})
+    tween:Play()
+end
+
+local function closeUI()
+    if not mainFrame or not mainFrame.Visible then return end
+    
+    local tween = TweenService:Create(uiScale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Scale = 0})
+    tween:Play()
+    tween.Completed:Connect(function()
+        mainFrame.Visible = false
+    end)
+end
+
+-----------------------------------------------------------
+-- UI CONSTRUCTION
+-----------------------------------------------------------
+
+-- Prevent duplicate GUIs
+if playerGui:FindFirstChild("SellShopMainGUI") then
+    playerGui.SellShopMainGUI:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SellShopMainGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 20
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+mainFrame = Instance.new("Frame")
+mainFrame.Name = "SellFrame"
+mainFrame.Size = UDim2.new(0, 800, 0, 500)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.Visible = false
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BackgroundTransparency = 0.05
+mainFrame.ZIndex = 10
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 15)
+local uiStroke = Instance.new("UIStroke", mainFrame)
+uiStroke.Color = Color3.fromRGB(80, 255, 100); uiStroke.Thickness = 3
+
+uiScale = Instance.new("UIScale", mainFrame)
+uiScale.Scale = 0
+
+local title = Instance.new("TextLabel", mainFrame)
+title.Text = "💸 MERCADO NEGRO (VENTA) 💸"; title.Size = UDim2.new(1, 0, 0, 50)
+title.BackgroundTransparency = 1; title.TextColor3 = Color3.fromRGB(80, 255, 100)
+title.Font = Enum.Font.GothamBlack; title.TextSize = 28; title.ZIndex = 11
+
+local closeBtn = Instance.new("TextButton", mainFrame)
+closeBtn.Size = UDim2.new(0, 40, 0, 40); closeBtn.Position = UDim2.new(1, -50, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50); closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.new(1, 1, 1); closeBtn.ZIndex = 15
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+closeBtn.MouseButton1Click:Connect(closeUI)
+
+inventoryArea = Instance.new("ScrollingFrame", mainFrame)
+inventoryArea.Name = "InventoryArea"; inventoryArea.Size = UDim2.new(0.65, -20, 1, -80)
+inventoryArea.Position = UDim2.new(0, 20, 0, 60); inventoryArea.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+inventoryArea.BackgroundTransparency = 0.5; inventoryArea.ScrollBarThickness = 6; inventoryArea.ZIndex = 11
+
+invGrid = Instance.new("UIGridLayout", inventoryArea)
+invGrid.CellSize = UDim2.new(0, 90, 0, 110); invGrid.CellPadding = UDim2.new(0, 10, 0, 10)
+invGrid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    inventoryArea.CanvasSize = UDim2.new(0, 0, 0, invGrid.AbsoluteContentSize.Y + 20)
+end)
+
+local invPadding = Instance.new("UIPadding", inventoryArea)
+invPadding.PaddingTop = UDim.new(0, 10); invPadding.PaddingLeft = UDim.new(0, 10)
+
+local sidebar = Instance.new("Frame", mainFrame)
+sidebar.Size = UDim2.new(0.3, 0, 1, -80); sidebar.Position = UDim2.new(0.68, 0, 0, 60)
+sidebar.BackgroundColor3 = Color3.fromRGB(30, 30, 35); sidebar.ZIndex = 11
+Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 10)
+
+local infoLabel = Instance.new("TextLabel", sidebar)
+infoLabel.Size = UDim2.new(1, -20, 0, 80); infoLabel.Position = UDim2.new(0, 10, 0, 10)
+infoLabel.BackgroundTransparency = 1; infoLabel.Text = "Selecciona brainrots para vender.\nSe actualiza al entrar al círculo."
+infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200); infoLabel.TextWrapped = true
+infoLabel.Font = Enum.Font.Gotham; infoLabel.TextSize = 14; infoLabel.ZIndex = 12
+
+local refreshBtn = Instance.new("TextButton", sidebar)
+refreshBtn.Name = "RefreshBtn"; refreshBtn.Size = UDim2.new(0.9, 0, 0, 35)
+refreshBtn.Position = UDim2.new(0.05, 0, 0, 100); refreshBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+refreshBtn.Text = "🔄 ACTUALIZAR"; refreshBtn.TextColor3 = Color3.new(1, 1, 1)
+refreshBtn.Font = Enum.Font.GothamBold; refreshBtn.TextSize = 14; refreshBtn.ZIndex = 12
+Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 6)
+refreshBtn.MouseButton1Click:Connect(loadInventory)
+
+totalLabel = Instance.new("TextLabel", sidebar)
+totalLabel.Size = UDim2.new(1, 0, 0, 40); totalLabel.Position = UDim2.new(0, 0, 0.6, 0)
+totalLabel.BackgroundTransparency = 1; totalLabel.Text = "Total: $0"
+totalLabel.TextColor3 = Color3.fromRGB(100, 255, 100); totalLabel.Font = Enum.Font.GothamBlack
+totalLabel.TextSize = 24; totalLabel.ZIndex = 12
+
+sellBtn = Instance.new("TextButton", sidebar)
+sellBtn.Size = UDim2.new(0.9, 0, 0, 50); sellBtn.Position = UDim2.new(0.05, 0, 0.8, 0)
+sellBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50); sellBtn.Text = "VENDER"
+sellBtn.TextColor3 = Color3.new(1, 1, 1); sellBtn.Font = Enum.Font.GothamBold
+sellBtn.TextSize = 20; sellBtn.ZIndex = 12
+Instance.new("UICorner", sellBtn).CornerRadius = UDim.new(0, 8)
+
+sellBtn.MouseButton1Click:Connect(function()
+    local ids = {}
+    for uuid in pairs(selectedUnits) do table.insert(ids, uuid) end
+    if #ids == 0 then return end
+    
+    sellBtn.Text = "..."; sellBtn.Active = false
+    local res = SellUnits:InvokeServer(ids)
+    if res and res.success then
+        loadInventory()
+        local s = Instance.new("Sound", game.SoundService)
+        s.SoundId = "rbxasset://sounds/electronicpingshort.wav"
+        s:Play()
+    end
+    sellBtn.Active = true
+end)
+
+-----------------------------------------------------------
+-- ZONE DETECTION LOOP
+-----------------------------------------------------------
+RunService.Heartbeat:Connect(function()
+    local char = player.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    local inAnyZone = false
+    local zones = CollectionService:GetTagged("SellZone")
+    
+    for _, zone in pairs(zones) do
+        if (root.Position - zone.Position).Magnitude < ZONE_RADIUS then
+            inAnyZone = true
+            break
+        end
+    end
+    
+    if inAnyZone and not wasInZone then
+        wasInZone = true
+        openUI()
+    elseif not inAnyZone and wasInZone then
+        wasInZone = false
+        closeUI()
+    end
+end)
+
+print("[PhysicalShopUI] Zone Detection Active. Version: Fixed Scoping.")

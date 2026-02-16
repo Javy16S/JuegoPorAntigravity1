@@ -1,0 +1,59 @@
+-- ZoneSpeedManager.client.lua
+-- Description: Sets player walkspeed to 40 in the Hub area.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local root = character:WaitForChild("HumanoidRootPart")
+
+-- Platform Boundaries (From MapManager)
+local MIN_X, MAX_X = -200, 200
+local MIN_Z, MAX_Z = -120, 120
+
+local HUB_SPEED = 40
+local DEFAULT_SPEED = 16
+
+local function isInsideHub(pos)
+    return pos.X >= MIN_X and pos.X <= MAX_X and pos.Z >= MIN_Z and pos.Z <= MAX_Z
+end
+
+-- Update loop
+RunService.Heartbeat:Connect(function()
+    if not character or not character.Parent then
+        character = player.Character
+        if character then
+            humanoid = character:FindFirstChild("Humanoid")
+            root = character:FindFirstChild("HumanoidRootPart")
+        end
+        return
+    end
+    
+    if not root or not humanoid then return end
+    
+    local pos = root.Position
+    local inHub = isInsideHub(pos)
+    
+    -- We check if speed is already higher (e.g. Absurd Speed) 
+    -- but usually, the user wants a fixed speed for the hub.
+    -- However, we'll favor higher speeds if present.
+    
+    local targetSpeed = inHub and HUB_SPEED or DEFAULT_SPEED
+    
+    -- Only set if it's currently at a "base" level to avoid fighting with powerups/animations
+    -- If the current speed is 16 or 40, we manage it. 
+    -- If it's something else (like 60 from InventoryManager or 0 from Animation), we leave it alone.
+    if humanoid.WalkSpeed == HUB_SPEED or humanoid.WalkSpeed == DEFAULT_SPEED then
+        if humanoid.WalkSpeed ~= targetSpeed then
+            humanoid.WalkSpeed = targetSpeed
+        end
+    end
+end)
+
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoid = character:WaitForChild("Humanoid")
+    root = character:WaitForChild("HumanoidRootPart")
+end)
