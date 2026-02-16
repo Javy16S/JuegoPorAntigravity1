@@ -7,7 +7,7 @@ local FusionData = {}
 -- Tier progression (11 tiers total)
 FusionData.TIER_ORDER = {
     "Common", "Rare", "Epic", "Legendary", "Mythic",
-    "Divine", "Celestial", "Cosmic", "Eternal", "Transcendent", "Infinite"
+    "Divine", "Celestial", "Eternal", "Cosmic", "Infinite", "Transcendent"
 }
 
 -- How many units needed to fuse
@@ -26,11 +26,11 @@ FusionData.TIER_NEXT = {
     
     -- SUPREME PROGRESSION
     ["Divine"] = "Celestial",
-    ["Celestial"] = "Cosmic",
-    ["Cosmic"] = "Eternal",
-    ["Eternal"] = "Transcendent",
-    ["Transcendent"] = "Infinite",
-    ["Infinite"] = nil -- MAX TIER - Cannot fuse further
+    ["Celestial"] = "Eternal",
+    ["Eternal"] = "Cosmic",
+    ["Cosmic"] = "Infinite",
+    ["Infinite"] = "Transcendent",
+    ["Transcendent"] = nil -- MAX TIER
 }
 
 -- Income multipliers by tier (for placed units)
@@ -41,13 +41,13 @@ FusionData.TIER_MULTIPLIERS = {
     ["Legendary"] = 1000,
     ["Mythic"] = 10000,
     
-    -- SUPREME MULTIPLIERS (massive jumps!)
+    -- SUPREME MULTIPLIERS
     ["Divine"] = 100000,
     ["Celestial"] = 1000000,
-    ["Cosmic"] = 10000000,
-    ["Eternal"] = 100000000,
-    ["Transcendent"] = 1000000000,
-    ["Infinite"] = 10000000000
+    ["Eternal"] = 10000000,
+    ["Cosmic"] = 100000000,
+    ["Infinite"] = 1000000000,
+    ["Transcendent"] = 10000000000
 }
 
 -- Shiny bonus multiplier

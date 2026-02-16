@@ -17,7 +17,7 @@ local function ensureRemote(name, class)
         local r = Instance.new(class)
         r.Name = name
         r.Parent = ReplicatedStorage
-        print("  Created Remote: " .. name)
+        -- print("  Created Remote: " .. name)
     end
 end
 
@@ -37,11 +37,25 @@ ensureRemote("SellHandUnit", "RemoteFunction")
 ensureRemote("GetSellValues", "RemoteFunction")
 ensureRemote("GetDiscovered", "RemoteFunction") -- New for Index
 ensureRemote("GetUpgradeData", "RemoteFunction") -- For Shop UI
+ensureRemote("UpgradeUnit", "RemoteFunction")
+ensureRemote("AchievementUnlocked", "RemoteEvent") -- NEW
+ensureRemote("EventStarted", "RemoteEvent") -- Notification UI
+ensureRemote("DoRebirth", "RemoteFunction") -- NEW
+ensureRemote("UpdateHotbar", "RemoteEvent")
+ensureRemote("PlayStallVFX", "RemoteEvent")
+ensureRemote("SyncSpeed", "RemoteEvent")
+ensureRemote("ClaimDailyReward", "RemoteEvent") -- NEW
 
 -- 2. RUN ORGANIZER FIRST (Move models to ServerStorage)
 local Organizer = require(ServerScriptService:WaitForChild("OrganizerTool"))
 if Organizer.Run then
     Organizer.Run()
+end
+
+-- 2.5 REPLICATE MODELS (Deterministic)
+local ModelReplicator = require(ServerScriptService:WaitForChild("ModelReplicator"))
+if ModelReplicator.Init then
+    ModelReplicator.Init()
 end
 
 -- 3. INITIALIZE DATA
@@ -69,6 +83,16 @@ end
 local ShopManager = require(ServerScriptService:WaitForChild("ShopManager"))
 if ShopManager.Init then
     ShopManager.Init()
+end
+
+local TradeManager = require(ServerScriptService:WaitForChild("TradeManager"))
+if TradeManager.Init then
+    TradeManager.Init()
+end
+
+local DailyRewardManager = require(ServerScriptService:WaitForChild("DailyRewardManager"))
+if DailyRewardManager.Init then
+    DailyRewardManager.Init()
 end
 
 print("[SystemLoader] Initialization Complete. All systems synchronized.")

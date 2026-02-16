@@ -1,6 +1,7 @@
 -- FusionAnimation.client.lua
 -- Skill: 3d-animation
--- Description: 3D World animation for Fusion table (3 models merge into 1)
+-- Description: 3D World animation for Fusion table (3 REAL MODELS merge into 1)
+-- Refinements: REMOVED CAMERA LOCKING as requested. Player can look around freely.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,7 +13,7 @@ local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
 -- Modules
-local CameraManager = require(ReplicatedStorage:WaitForChild("CameraManager"))
+local CameraManager = require(ReplicatedStorage.Modules:WaitForChild("CameraManager"))
 
 -- Wait for event
 local FusionEvent = ReplicatedStorage:WaitForChild("FusionEvent", 10)
@@ -25,10 +26,9 @@ end
 local CONFIG = {
     FloatHeight = 4,           -- How high units float
     SpinSpeed = 360,           -- Degrees per second
-    ConvergeDuration = 1.5,    -- Time to merge
+    ConvergeDuration = 2.0,    -- Time to merge
     ExplosionDelay = 0.3,      -- Flash before result
     ResultRevealDelay = 0.8,   -- Delay to show result
-    CameraDistance = 12,       -- Camera distance from center
 }
 
 -- Tier colors
@@ -38,298 +38,292 @@ local TIER_COLORS = {
     ["Epic"] = Color3.fromRGB(170, 0, 255),
     ["Legendary"] = Color3.fromRGB(255, 170, 0),
     ["Mythic"] = Color3.fromRGB(255, 0, 85),
-    ["Divine"] = Color3.fromRGB(255, 255, 255)
+    ["Divine"] = Color3.fromRGB(255, 255, 100),
+    ["Celestial"] = Color3.fromRGB(100, 255, 255),
+    ["Cosmic"] = Color3.fromRGB(200, 100, 255),
+    ["Eternal"] = Color3.fromRGB(220, 220, 255),
+    ["Transcendent"] = Color3.fromRGB(255, 100, 200),
+    ["Infinite"] = Color3.fromRGB(50, 255, 150),
 }
 
 -- Local state
 local isAnimating = false
 
--- Helper: Create glowing orb for sacrificed unit
-local function createSacrificeOrb(position, tier, index, total)
-    local orb = Instance.new("Part")
-    orb.Name = "SacrificeOrb_" .. index
-    orb.Shape = Enum.PartType.Ball
-    orb.Size = Vector3.new(3, 3, 3)
-    orb.Material = Enum.Material.Neon
-    orb.Color = TIER_COLORS[tier] or Color3.new(1, 1, 1)
-    orb.Anchored = true
-    orb.CanCollide = false
-    orb.CastShadow = false
-    orb.Position = position
-    orb.Parent = workspace
-    
-    -- Inner glow
-    local light = Instance.new("PointLight")
-    light.Color = orb.Color
-    light.Brightness = 3
-    light.Range = 8
-    light.Parent = orb
-    
-    -- Trail for movement
-    local att0 = Instance.new("Attachment")
-    att0.Position = Vector3.new(0, 0, 0)
-    att0.Parent = orb
-    
-    local att1 = Instance.new("Attachment")
-    att1.Position = Vector3.new(0, 1, 0)
-    att1.Parent = orb
-    
-    local trail = Instance.new("Trail")
-    trail.Attachment0 = att0
-    trail.Attachment1 = att1
-    trail.Lifetime = 0.5
-    trail.Color = ColorSequence.new(orb.Color)
-    trail.Transparency = NumberSequence.new(0, 1)
-    trail.Parent = orb
-    
-    return orb
+-- ============================================================================
+-- HELPER: SAFE COLOR
+-- ============================================================================
+local function getTierColor(tierName)
+    if not tierName then return Color3.new(1, 1, 1) end
+    return TIER_COLORS[tierName] or Color3.new(1, 1, 1)
 end
 
--- Helper: Create explosion flash
+-- ============================================================================
+-- HELPER: GET REAL MODEL
+-- ============================================================================
+local function getModelTemplate(name)
+    local ST = game:GetService("ReplicatedStorage"):FindFirstChild("BrainrotModels")
+    if not ST then return nil end
+    local cleanName = string.gsub(name, "Unit_", "")
+    local t = ST:FindFirstChild(cleanName, true)
+    if not t then
+        local spaced = cleanName:gsub("_", " ")
+        t = ST:FindFirstChild(spaced, true)
+    end
+    return t
+end
+
+-- ============================================================================
+-- HELPER: PREPARE VISUAL MODEL (Nuclear Sterilization)
+-- ============================================================================
+local function prepareVisualModel(visual)
+    -- 1. Sterilize
+    for _, v in pairs(visual:GetDescendants()) do
+        if v:IsA("Humanoid") or v:IsA("AnimationController") or v:IsA("BodyMover") or v:IsA("Constraint") or v:IsA("Accessory") then
+            v:Destroy()
+        elseif v:IsA("Script") or v:IsA("LocalScript") or v:IsA("Sound") then
+            v:Destroy()
+        end
+    end
+    visual:BreakJoints()
+
+    -- 2. Root & Weld
+    local root = visual:IsA("Model") and (visual.PrimaryPart or visual:FindFirstChild("HumanoidRootPart") or visual:FindFirstChildWhichIsA("BasePart", true)) or visual
+    if not root and visual:IsA("Model") then
+        root = Instance.new("Part")
+        root.Name = "MasterRoot"
+        root.Size = Vector3.new(1,1,1); root.Transparency=1; root.Anchored=true; root.CanCollide=false
+        root.Parent = visual
+    end
+    
+    if visual:IsA("Model") then visual.PrimaryPart = root end
+
+    -- Rigidify to Root
+    for _, part in pairs(visual:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Anchored = true -- For animation, Anchored is safer and smoother
+            part.CanCollide = false
+            part.Massless = true
+        end
+    end
+    
+    return visual
+end
+
+-- ============================================================================
+-- ANIMATION HELPERS
+-- ============================================================================
+
+local function createSacrificeModel(position, unitName, tier, index)
+    local template = getModelTemplate(unitName)
+    local model
+    
+    if template then
+        model = template:Clone()
+        model = prepareVisualModel(model)
+    else
+        model = Instance.new("Part")
+        model.Shape = Enum.PartType.Ball
+        model.Size = Vector3.new(3,3,3)
+        model.Material = Enum.Material.Neon
+        model.Anchored = true; model.CanCollide = false
+    end
+    
+    model.Name = "Sacrifice_" .. index
+    
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = getTierColor(tier)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.new(1, 1, 1)
+    highlight.OutlineTransparency = 0
+    highlight.Parent = model
+    
+    if model:IsA("Model") then
+        model:PivotTo(CFrame.new(position))
+    else
+        model.Position = position
+        model.Color = getTierColor(tier)
+    end
+    
+    model.Parent = workspace
+    return model
+end
+
 local function createExplosionFlash(position, color)
     local flash = Instance.new("Part")
     flash.Shape = Enum.PartType.Ball
     flash.Size = Vector3.new(0.5, 0.5, 0.5)
     flash.Material = Enum.Material.Neon
-    flash.Color = color
-    flash.Anchored = true
-    flash.CanCollide = false
-    flash.CastShadow = false
+    flash.Color = color or Color3.new(1,1,1)
+    flash.Anchored = true; flash.CanCollide = false; flash.CastShadow = false
     flash.Position = position
     flash.Parent = workspace
     
-    -- Expand
-    local expandTween = TweenService:Create(flash, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Size = Vector3.new(15, 15, 15),
-        Transparency = 0.5
-    })
-    expandTween:Play()
+    TweenService:Create(flash, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = Vector3.new(25, 25, 25), Transparency = 0.5
+    }):Play()
     
-    -- Then fade
     task.delay(0.3, function()
-        local fadeTween = TweenService:Create(flash, TweenInfo.new(0.5), {
-            Transparency = 1,
-            Size = Vector3.new(20, 20, 20)
-        })
-        fadeTween:Play()
-        fadeTween.Completed:Connect(function()
-            flash:Destroy()
-        end)
-    end)
-    
-    -- Light flash
-    local light = Instance.new("PointLight")
-    light.Color = color
-    light.Brightness = 10
-    light.Range = 30
-    light.Parent = flash
-    
-    task.spawn(function()
-        task.wait(0.1)
-        while light and light.Parent do
-            light.Brightness = light.Brightness * 0.8
-            if light.Brightness < 0.1 then break end
-            task.wait(0.02)
-        end
+        local t = TweenService:Create(flash, TweenInfo.new(0.5), {Transparency = 1, Size = Vector3.new(30, 30, 30)})
+        t:Play()
+        t.Completed:Connect(function() flash:Destroy() end)
     end)
     
     Debris:AddItem(flash, 2)
 end
 
--- Helper: Create result presentation
 local function createResultPresentation(position, name, tier, isShiny)
-    local presentation = Instance.new("Model")
-    presentation.Name = "FusionResult"
+    local template = getModelTemplate(name)
+    local presentation
     
-    -- Main part
-    local part = Instance.new("Part")
-    part.Shape = Enum.PartType.Ball
-    part.Size = Vector3.new(0.1, 0.1, 0.1) -- Start tiny
-    part.Material = Enum.Material.Neon
-    part.Color = TIER_COLORS[tier] or Color3.new(1, 1, 1)
-    part.Anchored = true
-    part.CanCollide = false
-    part.Position = position
-    part.Parent = presentation
-    
-    presentation.PrimaryPart = part
-    presentation.Parent = workspace
-    
-    -- Grow animation
-    local growTween = TweenService:Create(part, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = Vector3.new(5, 5, 5)
-    })
-    growTween:Play()
-    
-    -- Add label
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(8, 0, 4, 0)
-    bb.StudsOffset = Vector3.new(0, 5, 0)
-    bb.AlwaysOnTop = true
-    bb.Parent = part
-    
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.BackgroundTransparency = 1
-    frame.Parent = bb
-    
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    layout.Parent = frame
-    
-    -- Name
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.LayoutOrder = 1
-    nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = name
-    nameLabel.TextColor3 = Color3.new(1, 1, 1)
-    nameLabel.Font = Enum.Font.GothamBlack
-    nameLabel.TextScaled = true
-    nameLabel.Parent = frame
-    
-    local s1 = Instance.new("UIStroke")
-    s1.Thickness = 2
-    s1.Color = Color3.new(0, 0, 0)
-    s1.Parent = nameLabel
-    
-    -- Tier
-    local tierLabel = Instance.new("TextLabel")
-    tierLabel.LayoutOrder = 2
-    tierLabel.Size = UDim2.new(1, 0, 0.3, 0)
-    tierLabel.BackgroundTransparency = 1
-    tierLabel.Text = string.upper(tier)
-    tierLabel.TextColor3 = TIER_COLORS[tier] or Color3.new(1, 1, 1)
-    tierLabel.Font = Enum.Font.GothamBold
-    tierLabel.TextScaled = true
-    tierLabel.Parent = frame
-    
-    local s2 = Instance.new("UIStroke")
-    s2.Thickness = 1.5
-    s2.Color = Color3.new(0, 0, 0)
-    s2.Parent = tierLabel
-    
-    -- Shiny?
-    if isShiny then
-        local shinyLabel = Instance.new("TextLabel")
-        shinyLabel.LayoutOrder = 3
-        shinyLabel.Size = UDim2.new(1, 0, 0.25, 0)
-        shinyLabel.BackgroundTransparency = 1
-        shinyLabel.Text = "✨ SHINY ✨"
-        shinyLabel.TextColor3 = Color3.new(1, 1, 0)
-        shinyLabel.Font = Enum.Font.GothamBlack
-        shinyLabel.TextScaled = true
-        shinyLabel.Parent = frame
+    if template then
+        presentation = template:Clone()
+        presentation = prepareVisualModel(presentation)
+    else
+        presentation = Instance.new("Part")
+        presentation.Shape = Enum.PartType.Ball
+        presentation.Color = getTierColor(tier)
+        presentation.Anchored = true; presentation.CanCollide = false
     end
     
-    -- Glow
-    local light = Instance.new("PointLight")
-    light.Color = TIER_COLORS[tier] or Color3.new(1, 1, 1)
-    light.Brightness = 5
-    light.Range = 20
-    light.Parent = part
+    presentation.Name = "FusionResult"
     
-    -- Particles
-    local emitter = Instance.new("ParticleEmitter")
-    emitter.Color = ColorSequence.new(TIER_COLORS[tier] or Color3.new(1, 1, 1))
-    emitter.Size = NumberSequence.new(0.5, 0)
-    emitter.Transparency = NumberSequence.new(0, 1)
-    emitter.Lifetime = NumberRange.new(0.5, 1)
-    emitter.Speed = NumberRange.new(5, 10)
-    emitter.SpreadAngle = Vector2.new(360, 360)
-    emitter.Rate = isShiny and 100 or 50
-    emitter.Parent = part
+    local finalScale = 1.0
+    if presentation:IsA("Model") then
+        presentation:PivotTo(CFrame.new(position) * CFrame.new(0,-5,0)) 
+    else
+        presentation.Size = Vector3.new(0.1,0.1,0.1)
+        presentation.Position = position
+        TweenService:Create(presentation, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Size = Vector3.new(5,5,5)}):Play()
+    end
+    
+    presentation.Parent = workspace
+
+    if presentation:IsA("Model") then
+        local startCF = CFrame.new(position) * CFrame.Angles(0, math.rad(180), 0)
+        presentation:PivotTo(startCF)
+    end
+    
+    local h = Instance.new("Highlight")
+    h.FillTransparency = 1
+    h.OutlineColor = getTierColor(tier)
+    h.Parent = presentation
+    
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.new(8, 0, 4, 0)
+    bb.StudsOffset = Vector3.new(0, 7, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = presentation
+    
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1,0,1,0); frame.BackgroundTransparency = 1; frame.Parent = bb
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder; layout.HorizontalAlignment = Enum.HorizontalAlignment.Center; layout.Parent = frame
+    
+    local txt = Instance.new("TextLabel")
+    txt.Text = name:gsub("Unit_",""):gsub("_", " ")
+    txt.TextColor3 = Color3.new(1, 1, 1)
+    txt.Font = Enum.Font.GothamBlack
+    txt.TextScaled = true
+    txt.Size = UDim2.new(1,0,0.5,0)
+    txt.BackgroundTransparency = 1
+    txt.LayoutOrder = 1
+    txt.Parent = frame
+    Instance.new("UIStroke", txt).Thickness = 2
+    
+    local tierTxt = Instance.new("TextLabel")
+    tierTxt.Text = tier .. (isShiny and " ✨" or "")
+    tierTxt.TextColor3 = getTierColor(tier)
+    tierTxt.Font = Enum.Font.GothamBold
+    tierTxt.TextScaled = true
+    tierTxt.Size = UDim2.new(1,0,0.4,0)
+    tierTxt.BackgroundTransparency = 1
+    tierTxt.LayoutOrder = 2
+    tierTxt.Parent = frame
+    Instance.new("UIStroke", tierTxt).Thickness = 1.5
     
     return presentation
 end
 
--- Main fusion animation
+-- ============================================================================
+-- MAIN ANIMATION
+-- ============================================================================
 local function playFusionAnimation(data)
     if isAnimating then return end
     isAnimating = true
     
     local character = player.Character
     local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChild("Humanoid")
     
-    if not character or not rootPart or not humanoid then
+    if not character or not rootPart then
         isAnimating = false
         return
     end
-    
-    local originalWalkSpeed = humanoid.WalkSpeed
-    local originalJumpPower = humanoid.JumpPower
 
     local function cleanup()
-        CameraManager.unlock("Fusion")
-        if humanoid then
-            humanoid.WalkSpeed = originalWalkSpeed
-            humanoid.JumpPower = originalJumpPower
-        end
+        -- CameraManager.unlock("Fusion") -- REMOVED: No camera lock
         isAnimating = false
     end
 
-    -- Run with safety pcall
     local success, err = pcall(function()
-        humanoid.WalkSpeed = 0
-        humanoid.JumpPower = 0
-        
-        -- 2. Calculate center position (in front of player)
+        -- 1. Setup Center relative to player
         local lookDir = rootPart.CFrame.LookVector
-        local centerPos = rootPart.Position + lookDir * 8 + Vector3.new(0, CONFIG.FloatHeight, 0)
+        local centerPos = rootPart.Position + lookDir * 10 + Vector3.new(0, CONFIG.FloatHeight, 0)
         
-        -- 3. Create sacrifice orbs in triangle formation
-        local orbs = {}
+        -- 2. Create Models (Sacrifice)
+        local visuals = {}
         local sacrificedUnits = data.sacrificedUnits or {}
         local unitList = {}
-        for id, unit in pairs(sacrificedUnits) do
-            table.insert(unitList, unit)
-        end
+        for _, u in pairs(sacrificedUnits) do table.insert(unitList, u) end
         
-        local tier = "Common"
         for i = 1, 3 do
             local angle = (i / 3) * math.pi * 2 - math.pi / 2
-            local xOffset = math.cos(angle) * 5
-            local zOffset = math.sin(angle) * 5
+            local xOffset = math.cos(angle) * 8
+            local zOffset = math.sin(angle) * 8
             local pos = centerPos + Vector3.new(xOffset, 0, zOffset)
             
             local unit = unitList[i]
-            if unit then
-                tier = unit.Tier
+            local name = unit and unit.Name or "Unknown"
+            local tier = unit and unit.Tier or "Common"
+            
+            local visual = createSacrificeModel(pos, name, tier, i)
+            
+            if visual:IsA("Model") then
+                local cf = CFrame.lookAt(pos, centerPos)
+                visual:PivotTo(cf)
             end
             
-            local orb = createSacrificeOrb(pos, tier, i, 3)
-            table.insert(orbs, orb)
+            table.insert(visuals, visual)
         end
         
-        -- 4. Set camera
-        CameraManager.lock("Fusion", CFrame.new(centerPos + Vector3.new(0, 5, CONFIG.CameraDistance), centerPos), 0.5)
+        -- REMOVED: Camera locking
+        -- CameraManager.lock(...)
         
-        -- 5. Spin and float orbs
+        -- 3. Animate Loop
         local spinStart = tick()
         local spinConnection
         spinConnection = RunService.RenderStepped:Connect(function()
             local elapsed = tick() - spinStart
             
-            -- Spinning
-            for i, orb in ipairs(orbs) do
-                if orb and orb.Parent then
+            for i, visual in ipairs(visuals) do
+                if visual and visual.Parent then
                     local baseAngle = (i / 3) * math.pi * 2 - math.pi / 2
                     local currentAngle = baseAngle + elapsed * math.rad(CONFIG.SpinSpeed)
                     
-                    -- Converge towards center over time
                     local progress = math.min(elapsed / CONFIG.ConvergeDuration, 1)
-                    local radius = 5 * (1 - progress)
+                    local radius = 8 * (1 - progress)
                     
-                    local xOffset = math.cos(currentAngle) * radius
-                    local zOffset = math.sin(currentAngle) * radius
-                    local yOffset = math.sin(elapsed * 4) * 0.5 -- Bobbing
+                    local x = math.cos(currentAngle) * radius
+                    local z = math.sin(currentAngle) * radius
+                    local y = math.sin(elapsed * 5) * 1.5
                     
-                    orb.Position = centerPos + Vector3.new(xOffset, yOffset, zOffset)
+                    local targetPos = centerPos + Vector3.new(x, y, z)
+                    local lookAt = centerPos
                     
-                    -- Shrink as converging
-                    orb.Size = Vector3.new(3, 3, 3) * (1 - progress * 0.7)
+                    if visual:IsA("Model") then
+                        visual:PivotTo(CFrame.lookAt(targetPos, lookAt) * CFrame.Angles(0, math.rad(elapsed * 360), 0))
+                    else
+                        visual.Position = targetPos
+                    end
                 end
             end
             
@@ -338,19 +332,12 @@ local function playFusionAnimation(data)
             end
         end)
         
-        -- 6. Wait for convergence
         task.wait(CONFIG.ConvergeDuration)
         
-        -- 7. Explosion!
-        for _, orb in ipairs(orbs) do
-            if orb and orb.Parent then
-                orb:Destroy()
-            end
-        end
+        -- 4. Explosion
+        for _, v in ipairs(visuals) do v:Destroy() end
+        createExplosionFlash(centerPos, getTierColor(data.resultTier))
         
-        createExplosionFlash(centerPos, TIER_COLORS[data.resultTier] or Color3.new(1, 1, 1))
-        
-        -- Sound effect
         local sound = Instance.new("Sound")
         sound.SoundId = "rbxassetid://138090593"
         sound.Volume = 1
@@ -358,38 +345,28 @@ local function playFusionAnimation(data)
         sound:Play()
         Debris:AddItem(sound, 2)
         
-        -- 8. Brief darkness
         task.wait(CONFIG.ExplosionDelay)
         
-        -- 9. Result appears!
-        local result = createResultPresentation(centerPos, data.resultName, data.resultTier, data.isShiny)
+        -- 5. Result
+        local res = createResultPresentation(centerPos, data.resultName, data.resultTier, data.isShiny)
         
-        -- Camera push
-        TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Back), {
-            CFrame = CFrame.new(centerPos + Vector3.new(0, 3, 10), centerPos)
-        }):Play()
+        -- REMOVED: Camera Tween push-in
+        -- TweenService:Create(camera, ...):Play()
         
-        -- 10. Hold for appreciation
-        task.wait(2.5)
-        
-        -- 11. Cleanup
-        if result and result.Parent then
-            result:Destroy()
-        end
+        task.wait(3)
+        if res then res:Destroy() end
     end)
-
-    if not success then
-        warn("[FusionAnimation] CRITICAL ERROR during animation: " .. tostring(err))
-    end
     
+    if not success then warn("Animation Logic Error: " .. tostring(err)) end
     cleanup()
 end
 
--- Listen for fusion events
+DataHandler = nil 
+
 FusionEvent.OnClientEvent:Connect(function(data)
     if data and data.success then
         playFusionAnimation(data)
     end
 end)
 
-print("[FusionAnimation] Client animation system loaded")
+print("[FusionAnimation] Loaded - Camera Free Look")

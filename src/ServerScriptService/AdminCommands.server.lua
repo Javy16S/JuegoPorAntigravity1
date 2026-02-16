@@ -82,6 +82,33 @@ local COMMANDS = {
         local BrainrotData = require(ServerScriptService.BrainrotData)
         BrainrotData.addCash(player, 1000000) -- Give 1M
         print("[AdminCommands] Added 1M money to " .. player.Name)
+    end,
+
+    ["/spawnmutation"] = function(player, args) -- /spawnmutation UnitName MutationName
+        if not args or #args < 2 then 
+            warn("Usage: /spawnmutation [Name] [Mutation]")
+            return 
+        end
+        local unitName = args[1]
+        local mutationName = args[2]
+        
+        local BrainrotData = require(ServerScriptService.BrainrotData)
+        -- Give unit to player directly
+        BrainrotData.addUnitAdvanced(player, unitName, "Common", false, false, mutationName)
+        print("[AdminCommands] Gave " .. unitName .. " with mutation " .. mutationName .. " to " .. player.Name)
+    end,
+
+    ["/triggerevent"] = function(player, args) -- /triggerevent 1 (Minor) or 2 (Major)
+        local evtType = args and args[1] or "Minor"
+        local EventManager = require(ServerScriptService.EventManager)
+        
+        if evtType == "Minor" then
+            EventManager.triggerMinorEvent()
+        elseif evtType == "Major" then
+            EventManager.triggerMajorEvent()
+        else
+            warn("Usage: /triggerevent [Minor/Major]")
+        end
     end
 }
 
@@ -90,10 +117,18 @@ COMMANDS["/fullreset"] = COMMANDS["/resetdata"]
 
 Players.PlayerAdded:Connect(function(player)
     player.Chatted:Connect(function(message)
-        local msg = message:lower()
-        local cmd = msg:split(" ")[1]
+        -- message = "/cmd arg1 arg2"
+        local parts = message:split(" ")
+        local cmd = parts[1]
+        local args = {}
+        if #parts > 1 then
+            for i = 2, #parts do
+                table.insert(args, parts[i])
+            end
+        end
+        
         if COMMANDS[cmd] then
-            COMMANDS[cmd](player)
+            COMMANDS[cmd](player, args)
         end
     end)
 end)

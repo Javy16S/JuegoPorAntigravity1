@@ -1,0 +1,28 @@
+# Configuración de Selene - Linter para Luau/Roblox
+# https://kampfkarren.github.io/selene/
+
+std = "roblox"
+
+[rules]
+# Errores de variables
+unused_variable = "warn"
+undefined_variable = "warn"
+shadowing = "warn"
+unscoped_variables = "warn"
+
+# Errores de código
+divide_by_zero = "deny"
+empty_if = "warn"
+if_same_then_else = "warn"
+almost_swapped = "warn"
+
+# Estilo
+parenthese_conditions = "allow"  # Permitir condiciones sin paréntesis
+
+# Roblox específico
+roblox_incorrect_color3_new_bounds = "deny"
+roblox_incorrect_roact_usage = "deny"
+
+# Globales permitidas (añade las tuyas aquí)
+[config]
+allow_unused_self = true

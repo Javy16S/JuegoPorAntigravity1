@@ -1,9 +1,10 @@
 -- EggAnimation.client.lua
 -- Skill: 3d-animation
--- Description: EPIC MULTI-OPENING GACHA.
--- Phase 1: A "Tornado" of spinning models around the tower area.
--- Phase 2: Staggered reveal where each slot stops its roulette and shows the winner.
--- Phase 3: The final vertical column spins together in a panoramic wide view.
+-- Description: HYBRID GACHA ANIMATION SYSTEM
+-- Single Open: "Brainrot Pop" (Fast cuts, intense focus).
+-- Multi Open: "Horizontal Scroll" (Clean rail reveal).
+
+print("[EggAnimation] Script Initializing...")
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,87 +16,129 @@ local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
 -- Modules
-local MutationManager = require(ReplicatedStorage:WaitForChild("MutationManager"))
-local CameraManager = require(ReplicatedStorage:WaitForChild("CameraManager"))
+local MutationManager = require(ReplicatedStorage.Modules:WaitForChild("MutationManager"))
+local CameraManager = require(ReplicatedStorage.Modules:WaitForChild("CameraManager"))
 
 -- Wait for event
+print("[EggAnimation] Waiting for EggOpenEvent...")
 local EggOpenEvent = ReplicatedStorage:WaitForChild("EggOpenEvent", 10)
-if not EggOpenEvent then return end
+if not EggOpenEvent then 
+    warn("[EggAnimation] Failed to find EggOpenEvent!")
+    return 
+end
 
 -- Cinematic Configuration
 local CONFIG = {
-    CameraDistance = 50,       -- Slightly closer for better detail
-    FocusDistance = 20,        -- Closer to player
-    BaseHeight = 6,           -- Lower starting height
-    VerticalSpacing = 5.5,     -- Tighter vertical stack for better visibility
-    RouletteDuration = 3.5,    -- More tension
-    SpinSpeed = 12,            -- Faster rotation
-    RevealStagger = 0.35,      -- Slightly faster reveal
-}
-
-local TIER_COLORS = {
-    ["Common"] = Color3.fromRGB(200, 200, 200),
-    ["Rare"] = Color3.fromRGB(0, 170, 255),
-    ["Epic"] = Color3.fromRGB(170, 0, 255),
-    ["Legendary"] = Color3.fromRGB(255, 170, 0),
-    ["Mythic"] = Color3.fromRGB(255, 0, 85),
-    ["Divine"] = Color3.fromRGB(255, 255, 100),
-    ["Celestial"] = Color3.fromRGB(100, 255, 255),
-    ["Cosmic"] = Color3.fromRGB(200, 100, 255),
-    ["Eternal"] = Color3.fromRGB(255, 255, 255),
-    ["Transcendent"] = Color3.fromRGB(255, 100, 200),
-    ["Infinite"] = Color3.fromRGB(50, 255, 150),
+    -- Single Open "Pop" Settings
+    Pop = {
+        Cycles = 12,            -- How many "fake" items pop before reveal
+        CycleSpeed = 0.25,      -- Slightly slower for smoother feel
+        RevealScale = 1.8,      -- Size of winner
+        CameraDistance = 18,    -- Close up
+        HeightOffset = 4,
+    },
+    -- Multi Open "Scroll" Settings
+    Scroll = {
+        Spacing = 10,           -- Studs between items
+        RevealDelay = 0.5,      -- Slightly slower reveal
+        CameraDistance = 22,    -- Distance for the rail view
+        CameraHeight = 6,
+        TravelSpeed = 1,        -- Multiplier for camera pan
+    },
+    -- Shared
+    TierColors = {
+        ["Common"] = Color3.fromRGB(200, 200, 200),
+        ["Rare"] = Color3.fromRGB(0, 170, 255),
+        ["Epic"] = Color3.fromRGB(170, 0, 255),
+        ["Legendary"] = Color3.fromRGB(255, 170, 0),
+        ["Mythic"] = Color3.fromRGB(255, 0, 85),
+        ["Divine"] = Color3.fromRGB(255, 255, 100),
+        ["Celestial"] = Color3.fromRGB(100, 255, 255),
+        ["Cosmic"] = Color3.fromRGB(200, 100, 255),
+        ["Eternal"] = Color3.fromRGB(255, 255, 255),
+        ["Infinite"] = Color3.fromRGB(50, 255, 150),
+    }
 }
 
 local isAnimating = false
 
+-- Helper: Create ambient light for the animation (No physical floor)
+local function createStage(position)
+    local stage = Instance.new("Model")
+    stage.Name = "AnimationStage"
+    
+    -- Invisible anchor for light so we don't need a physical floor
+    local anchor = Instance.new("Part")
+    anchor.Name = "StageLightAnchor"
+    anchor.Size = Vector3.new(1, 1, 1)
+    anchor.Position = position + Vector3.new(0, 8, 0) -- Light from above
+    anchor.Anchored = true
+    anchor.Transparency = 1      -- INVISIBLE
+    anchor.CanCollide = false
+    anchor.CastShadow = false
+    anchor.Parent = stage
+    
+    -- Spotlight (Atmosphere)
+    local light = Instance.new("PointLight")
+    light.Range = 40
+    light.Brightness = 3
+    light.Color = Color3.fromRGB(220, 200, 255)
+    light.Parent = anchor
+    
+    return stage
+end
+
 -- Helper: Get actual model and apply visual mutations
 local function getModelPreview(modelName, tier, isShiny)
-    -- 1. Try to find real model in ReplicatedStorage
     local template = ReplicatedStorage:FindFirstChild(modelName, true)
     local preview
     
     if template and template:IsA("Model") then
         preview = template:Clone()
     else
-        -- Fallback to ball if model not localized
+        -- Fallback
         preview = Instance.new("Model")
         local p = Instance.new("Part")
-        p.Name = "PrimaryPart"; p.Size = Vector3.new(5,5,5); p.Shape = Enum.PartType.Ball
-        p.Material = Enum.Material.Neon; p.Color = TIER_COLORS[tier] or TIER_COLORS["Common"]
+        p.Name = "PrimaryPart"; p.Size = Vector3.new(4,4,4); p.Shape = Enum.PartType.Ball
+        p.Material = Enum.Material.Neon; p.Color = CONFIG.TierColors[tier] or Color3.new(1,1,1)
         p.Parent = preview; preview.PrimaryPart = p
     end
     
     preview.Name = modelName
     local primaryPart = preview.PrimaryPart or preview:FindFirstChildWhichIsA("BasePart")
-    if primaryPart then primaryPart.Anchored = true; primaryPart.CanCollide = false end
+    if primaryPart then 
+        primaryPart.Anchored = true
+        primaryPart.CanCollide = false 
+        preview.PrimaryPart = primaryPart -- Ensure PrimaryPart is set
+    end
 
-    -- 2. Apply Visual Mutations (Scaling, Particles, Colors)
+    -- Apply Visuals
     MutationManager.applyMutation(preview, tier, isShiny)
 
-    -- 3. Billboard UI for info
+    -- Floating UI
     local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(12, 0, 4, 0)
-    bb.StudsOffset = Vector3.new(0, 8, 0)
+    bb.Size = UDim2.new(12, 0, 4, 0) -- Slightly larger
+    bb.StudsOffset = Vector3.new(0, 7, 0)
     bb.AlwaysOnTop = true
     bb.Parent = primaryPart
     
     local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size = UDim2.new(1, 0, 0.45, 0)
+    nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    nameLabel.Position = UDim2.new(0,0,0,0)
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = (isShiny and "✨ SHINY ✨\n" or "") .. modelName
+    nameLabel.Text = (isShiny and "✨ " or "") .. modelName
     nameLabel.TextColor3 = Color3.new(1, 1, 1)
     nameLabel.Font = Enum.Font.FredokaOne
     nameLabel.TextScaled = true
     nameLabel.Parent = bb
-    Instance.new("UIStroke", nameLabel).Thickness = 3
-
+    Instance.new("UIStroke", nameLabel).Thickness = 2.5
+    
     local tierLabel = Instance.new("TextLabel")
-    tierLabel.Size = UDim2.new(1, 0, 0.3, 0)
-    tierLabel.Position = UDim2.new(0, 0, 0.5, 0)
+    tierLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    tierLabel.Position = UDim2.new(0,0,0.6,0)
     tierLabel.BackgroundTransparency = 1
     tierLabel.Text = string.upper(tier)
-    tierLabel.TextColor3 = TIER_COLORS[tier] or Color3.new(1,1,1)
+    tierLabel.TextColor3 = CONFIG.TierColors[tier] or Color3.new(1,1,1)
     tierLabel.Font = Enum.Font.FredokaOne
     tierLabel.TextScaled = true
     tierLabel.Parent = bb
@@ -104,274 +147,317 @@ local function getModelPreview(modelName, tier, isShiny)
     return preview
 end
 
+-- Helper: Create a silhouette clone (Pure Black Neon/Plastic)
+local function createSilhouette(modelName)
+    local template = ReplicatedStorage:FindFirstChild(modelName, true)
+    if not template then return nil end
+    
+    local clone = template:Clone()
+    
+    -- Strip everything, make it a shadow
+    for _, part in ipairs(clone:GetDescendants()) do
+        if part:IsA("BasePart") then
+            -- Make it dark but visible (Neon slightly effective even if black, depends heavily on lighting)
+            -- Or just very dark grey Neon
+            part.Material = Enum.Material.Neon 
+            part.Color = Color3.fromRGB(10, 10, 10) -- Almost Black
+            part.Transparency = 0.3 -- Ghostly
+            part.CastShadow = false
+            part.CanCollide = false
+            part.Anchored = true
+        elseif part:IsA("Texture") or part:IsA("Decal") or part:IsA("ParticleEmitter") or part:IsA("BillboardGui") or part:IsA("Sparkles") or part:IsA("Fire") or part:IsA("Smoke") then
+            part:Destroy()
+        end
+    end
+    
+    -- Ensure primary part
+    if not clone.PrimaryPart then
+        local p = clone:FindFirstChildWhichIsA("BasePart")
+        if p then clone.PrimaryPart = p end
+    end
+    
+    return clone
+end
+
+-- ANIMATION 1: BRAINROT POP (Single Open)
+local function playPopAnimation(data, origin)
+    local winnerData = data.results[1]
+    local possibilities = data.possibilities
+    local centerPos = origin + Vector3.new(0, CONFIG.Pop.HeightOffset, 0)
+    
+    -- Camera setup
+    local camPos = centerPos + Vector3.new(0, 3, CONFIG.Pop.CameraDistance) -- Higher angle
+    CameraManager.lock("EggOpening", CFrame.new(camPos, centerPos), 0.8)
+    
+    -- Sequence: Smoother cuts
+    for i = 1, CONFIG.Pop.Cycles do
+        -- Pick random fake
+        local fakeData = possibilities[math.random(1, #possibilities)]
+        local fakeModel = getModelPreview(fakeData.Name, fakeData.Tier, false)
+        fakeModel.Parent = workspace
+        
+        if fakeModel.PrimaryPart then
+            fakeModel:PivotTo(CFrame.new(centerPos) * CFrame.Angles(0, math.rad(math.random(0, 360)), 0))
+            
+            -- Pop Effect: Scale 0 -> 1 -> 0
+            local finalSize = fakeModel.PrimaryPart.Size
+            fakeModel.PrimaryPart.Size = Vector3.new(0.1, 0.1, 0.1)
+            
+            -- Scale Up Tween (Slower in)
+            local tIn = TweenService:Create(fakeModel.PrimaryPart, TweenInfo.new(CONFIG.Pop.CycleSpeed * 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = finalSize
+            })
+            tIn:Play()
+            
+            -- Wait
+            task.wait(CONFIG.Pop.CycleSpeed * 0.6)
+            
+            -- Scale Down Tween (Disappear smoothly)
+            local tOut = TweenService:Create(fakeModel.PrimaryPart, TweenInfo.new(CONFIG.Pop.CycleSpeed * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = Vector3.new(0.1, 0.1, 0.1)
+            })
+            tOut:Play()
+            tOut.Completed:Wait() -- Wait for shrink before next
+        end
+        
+        fakeModel:Destroy()
+    end
+    
+    -- REVEAL WINNER
+    local winnerModel = getModelPreview(winnerData.resultName, winnerData.resultTier, winnerData.isShiny)
+    winnerModel.Parent = workspace
+    
+    if winnerModel.PrimaryPart then
+        winnerModel:PivotTo(CFrame.new(centerPos))
+        
+        -- Start small
+        local targetSize = winnerModel.PrimaryPart.Size
+        winnerModel.PrimaryPart.Size = Vector3.new(0,0,0)
+        
+        -- Explosion Effect
+        local explosion = Instance.new("Part")
+        explosion.Position = centerPos
+        explosion.Shape = Enum.PartType.Ball
+        explosion.Size = Vector3.new(1,1,1)
+        explosion.Color = CONFIG.TierColors[winnerData.resultTier] or Color3.new(1,1,1)
+        explosion.Material = Enum.Material.Neon
+        explosion.Transparency = 0.2
+        explosion.Anchored = true; explosion.CanCollide = false
+        explosion.Parent = workspace
+        
+        TweenService:Create(explosion, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = Vector3.new(35,35,35), Transparency = 1}):Play()
+        Debris:AddItem(explosion, 0.6)
+        
+        -- Scale Up Winner (Slower, Majestic)
+        local t = TweenService:Create(winnerModel.PrimaryPart, TweenInfo.new(0.8, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {
+            Size = targetSize
+        })
+        t:Play()
+        t.Completed:Wait()
+        
+        -- Rotate winner for a moment
+        local start = tick()
+        while tick() - start < 2.5 do
+            winnerModel:PivotTo(CFrame.new(centerPos) * CFrame.Angles(0, (tick()-start)*2, 0))
+            RunService.RenderStepped:Wait()
+        end
+        
+        -- Shrink away nicely
+        TweenService:Create(winnerModel.PrimaryPart, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+            Size = Vector3.new(0,0,0)
+        }):Play()
+        task.wait(0.4)
+        
+        winnerModel:Destroy()
+    end
+end
+
+-- ANIMATION 2: HORIZONTAL SCROLL (Multi Open)
+local function playScrollAnimation(data, origin)
+    local results = data.results
+    local possibilities = data.possibilities or {} -- Needed for silhouettes
+    local amount = #results
+    local activeModels = {}
+    
+    -- Calculated positions
+    local totalWidth = (amount - 1) * CONFIG.Scroll.Spacing
+    local startX = -(totalWidth / 2)
+    
+    -- Setup items (Start with Cycling Silhouettes)
+    for i = 1, amount do
+        local xOffset = startX + (i-1) * CONFIG.Scroll.Spacing
+        local pos = origin + Vector3.new(xOffset, CONFIG.Scroll.CameraHeight, 0)
+        
+        -- Container for this slot
+        local slotData = {
+            Position = pos,
+            Result = results[i],
+            Revealed = false,
+            CurrentSilhouette = nil
+        }
+        
+        table.insert(activeModels, slotData)
+        
+        -- START SILHOUETTE LOOP for this slot (Async)
+        task.spawn(function()
+            local seed = i * 10 
+            while not slotData.Revealed and isAnimating do
+                -- 1. Clean previous
+                if slotData.CurrentSilhouette then
+                    slotData.CurrentSilhouette:Destroy()
+                end
+                
+                -- 2. Pick random possibility to shadow-morph into
+                if #possibilities > 0 then
+                    local randIndex = math.random(1, #possibilities)
+                    local randomData = possibilities[randIndex]
+                    local sil = createSilhouette(randomData.Name)
+                    
+                    if sil and sil.PrimaryPart then
+                        sil:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(math.random(0,360)), 0))
+                        sil.Parent = workspace
+                        slotData.CurrentSilhouette = sil
+                        
+                        -- Slight "Breathing" animation for silhouette?
+                        TweenService:Create(sil.PrimaryPart, TweenInfo.new(0.15, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+                            Size = sil.PrimaryPart.Size * 1.15
+                        }):Play()
+                    end
+                end
+                
+                task.wait(0.15) -- Cycle speed (fast)
+            end
+            
+            -- Force Cleanup when loop ends (revealed)
+            if slotData.CurrentSilhouette then
+                slotData.CurrentSilhouette:Destroy()
+                slotData.CurrentSilhouette = nil
+            end
+        end)
+    end
+    
+    -- Camera Motion: Pan along the line
+    local startCamPos = activeModels[1].Position + Vector3.new(0, 2, CONFIG.Scroll.CameraDistance)
+    
+    CameraManager.lock("EggOpening", CFrame.new(startCamPos, activeModels[1].Position), 0.5)
+    task.wait(0.5)
+    
+    -- Iterate and reveal sequentially
+    for i, item in ipairs(activeModels) do
+        -- Move camera to this item (Smooth pan)
+        local targetCamPos = item.Position + Vector3.new(0, 2, CONFIG.Scroll.CameraDistance)
+        local lookAt = item.Position
+        
+        -- Tween Camera
+        local camTween = TweenService:Create(camera, TweenInfo.new(CONFIG.Scroll.RevealDelay * 1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
+            CFrame = CFrame.new(targetCamPos, lookAt)
+        })
+        camTween:Play()
+        
+        -- Stop silhouette loop and reveal
+        item.Revealed = true
+        task.wait(0.1) -- Tiny pause for anticipation
+        
+        local winnerData = item.Result
+        
+        -- REVEAL: Winner Pops Out Smoothly
+        local model = getModelPreview(winnerData.resultName, winnerData.resultTier, winnerData.isShiny)
+        model.Parent = workspace
+        if model.PrimaryPart then
+            model:PivotTo(CFrame.new(item.Position))
+            local normalSize = model.PrimaryPart.Size
+            model.PrimaryPart.Size = Vector3.new(0,0,0) -- Start tiny
+            
+            -- Pop In
+            TweenService:Create(model.PrimaryPart, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = normalSize
+            }):Play()
+            
+            -- Flash Color Burst
+            local flash = Instance.new("Part")
+            flash.Position = item.Position
+            flash.Anchored = true; flash.CanCollide = false
+            flash.Transparency = 0.5
+            flash.Size = Vector3.new(1,1,1)
+            flash.Shape = Enum.PartType.Ball
+            flash.Color = CONFIG.TierColors[winnerData.resultTier] or Color3.new(1,1,1)
+            flash.Material = Enum.Material.Neon
+            flash.Parent = workspace
+            TweenService:Create(flash, TweenInfo.new(0.5), {Size = Vector3.new(12,12,12), Transparency = 1}):Play()
+            Debris:AddItem(flash, 0.6)
+        end
+        
+        item.Model = model
+        
+        task.wait(CONFIG.Scroll.RevealDelay)
+    end
+    
+    -- Hold final view for a second
+    task.wait(1.5)
+    
+    -- Scale down all for cleanup
+    for _, item in ipairs(activeModels) do
+        if item.Model and item.Model.PrimaryPart then 
+            TweenService:Create(item.Model.PrimaryPart, TweenInfo.new(0.4), {Size = Vector3.new(0,0,0)}):Play()
+            Debris:AddItem(item.Model, 0.5)
+        end
+    end
+end
+
+-- MAIN RUNNER
 local function runEggOpeningAnimation(data)
+    print("[EggAnimation] Requesting animation for", data.amount)
     if isAnimating then return end
     isAnimating = true
     
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChild("Humanoid")
     
-    if not root or not hum then 
-        isAnimating = false 
-        return 
-    end
+    if not root then isAnimating = false; return end
     
-    -- Capture original speed to restore later
-    local originalSpeed = hum.WalkSpeed
-
-    local activeAnimationModels = {}
-
-    local function cleanup()
-        CameraManager.unlock("EggOpening")
-        if hum then 
-            -- Restore original speed instead of resetting to hardcoded values
-            hum.WalkSpeed = originalSpeed
-        end
-        
-        -- Final safety cleanup: Destroy all tracked models that still exist
-        for _, model in ipairs(activeAnimationModels) do
-            if model and model.Parent then
-                model:Destroy()
-            end
-        end
-        activeAnimationModels = {}
-        
-        isAnimating = false
-    end
-
-    -- Run with safety pcall
+    -- Setup clean environment relative to player
+    local origin = root.Position + (root.CFrame.LookVector * 25) + Vector3.new(0, 5, 0)
+    
+    local stage = createStage(origin)
+    stage.Parent = workspace
+    
+    -- Run appropriate animation
     local success, err = pcall(function()
-        hum.WalkSpeed = 0
-        
-        local amount = data.amount or #data.results
-        local results = data.results
-        local possibilities = data.possibilities or {}
-        
-        -- 1. Setup Scene positions
-        local towerPos = root.Position + root.CFrame.LookVector * CONFIG.FocusDistance + Vector3.new(0, CONFIG.BaseHeight, 0)
-        local camPos = towerPos - root.CFrame.LookVector * CONFIG.CameraDistance + Vector3.new(0, 15, 0)
-        local totalHeight = amount * CONFIG.VerticalSpacing
-        local camTarget = towerPos + Vector3.new(0, totalHeight / 2, 0)
-
-        CameraManager.lock("EggOpening", CFrame.new(camPos, camTarget), 0.8)
-
-        -- 2. PHASE 1: SETUP LAYERS (Círculos de ruleta)
-        local layers = {}
-        local modelsPerLayer = 10
-        local layerRadius = 15
-        
-        for i = 1, amount do
-            local layerDummies = {}
-            local winnerData = results[i]
-            
-            -- Each layer has a "winner slot" at angle 0 (relative to camera direction)
-            for j = 1, modelsPerLayer do
-                local isWinnerSlot = (j == 1)
-                local modelData = isWinnerSlot and winnerData or (possibilities[math.random(1, #possibilities)] or {Name = "???", Tier = "Common"})
-                local modelName = isWinnerSlot and modelData.resultName or modelData.Name
-                local modelTier = isWinnerSlot and modelData.resultTier or modelData.Tier
-                local isShiny = isWinnerSlot and modelData.isShiny or false
-                
-                local model = getModelPreview(modelName, modelTier, isShiny)
-                model.Parent = workspace
-                table.insert(activeAnimationModels, model)
-                
-                -- Start hidden (respecting original transparency)
-                for _, p in pairs(model:GetDescendants()) do 
-                    if p:IsA("BasePart") then 
-                        p:SetAttribute("OriginalTransparency", p.Transparency)
-                        if p.Transparency < 1 then
-                            p.Transparency = 1 
-                        end
-                    end 
-                end
-                
-                table.insert(layerDummies, {
-                    Model = model,
-                    AngleOffset = (j - 1) * (math.pi * 2 / modelsPerLayer),
-                    IsWinner = isWinnerSlot,
-                    ResultData = winnerData
-                })
-            end
-            
-            table.insert(layers, {
-                Dummies = layerDummies,
-                Height = (i - 1) * CONFIG.VerticalSpacing
-            })
+        if data.amount == 1 then
+            playPopAnimation(data, origin)
+        else
+            playScrollAnimation(data, origin)
         end
-
-        -- Fade in all models (restoring original transparency)
-        for _, layer in ipairs(layers) do
-            for _, d in ipairs(layer.Dummies) do
-                for _, p in pairs(d.Model:GetDescendants()) do
-                    if p:IsA("BasePart") then 
-                        local originalTrans = p:GetAttribute("OriginalTransparency") or 0
-                        TweenService:Create(p, TweenInfo.new(0.5), {Transparency = originalTrans}):Play() 
-                    end
-                end
-            end
+    end)
+    
+    if not success then warn("Animation Error:", err) end
+    
+    -- Equip last item logic
+    pcall(function()
+        local lastResult = data.results[#data.results]
+        local toolName = "Unit_" .. lastResult.resultName
+        local backpack = player:FindFirstChild("Backpack")
+        local tool = backpack and backpack:FindFirstChild(toolName)
+        if tool and player.Character and player.Character:FindFirstChild("Humanoid") then
+            player.Character.Humanoid:EquipTool(tool)
         end
-
-        -- Create Selection Marker (Vertical Beam)
-        local selectionPos = towerPos + Vector3.new(layerRadius, (totalHeight-CONFIG.VerticalSpacing)/2, 0)
-        local marker = Instance.new("Part")
-        marker.Name = "SelectionMarker"
-        marker.Size = Vector3.new(1, totalHeight + 10, 1)
-        marker.Position = selectionPos
-        marker.Color = Color3.fromRGB(0, 255, 255) -- Cyan Holographic
-        marker.Material = Enum.Material.Neon
-        marker.Transparency = 0.5
-        marker.Anchored = true
-        marker.CanCollide = false
-        marker.Parent = workspace
-        table.insert(activeAnimationModels, marker)
-
-        -- Selection Glow (Aura)
-        local light = Instance.new("PointLight")
-        light.Color = marker.Color
-        light.Brightness = 2
-        light.Range = 20
-        light.Parent = marker
-
-        -- 3. PHASE 2: UNISON ROTATION (Roulette)
-        local spinAngle = 0
-        local spinSpeed = CONFIG.SpinSpeed
-        local startTime = tick()
-        local duration = CONFIG.RouletteDuration
-        
-        local rotationConn
-        rotationConn = RunService.RenderStepped:Connect(function(dt)
-            local elapsed = tick() - startTime
-            local alpha = math.clamp(elapsed / duration, 0, 1)
-            
-            -- Slow down towards the end
-            local currentSpeed = spinSpeed * (1 - alpha * 0.8)
-            spinAngle += currentSpeed * dt
-            
-            -- Pulsate marker logic
-            marker.Transparency = 0.5 + math.sin(tick() * 10) * 0.2
-            
-            for _, layer in ipairs(layers) do
-                local layerPos = towerPos + Vector3.new(0, layer.Height, 0)
-                for _, d in ipairs(layer.Dummies) do
-                    if not d.Model.Parent then continue end
-                    local totalAngle = spinAngle + d.AngleOffset
-                    local x = math.cos(totalAngle) * layerRadius
-                    local z = math.sin(totalAngle) * layerRadius
-                    
-                    -- Look at center
-                    d.Model:PivotTo(CFrame.new(layerPos + Vector3.new(x, 0, z), layerPos) * CFrame.Angles(0, math.pi, 0))
-                end
-            end
-        end)
-
-        task.wait(duration)
-        rotationConn:Disconnect()
-        
-        -- Fade out marker
-        TweenService:Create(marker, TweenInfo.new(0.5), {Transparency = 1, Size = Vector3.new(0, totalHeight + 10, 0)}):Play()
-        Debris:AddItem(marker, 0.5)
-
-        -- 4. PHASE 3: SELECTION & REVEAL
-        local winnerModels = {}
-        
-        for i, layer in ipairs(layers) do
-            local layerPos = towerPos + Vector3.new(0, layer.Height, 0)
-            local winnerDummy = nil
-            
-            for _, d in ipairs(layer.Dummies) do
-                if d.IsWinner then
-                    winnerDummy = d
-                else
-                    -- Fade out non-winners
-                    for _, p in pairs(d.Model:GetDescendants()) do
-                        if p:IsA("BasePart") then TweenService:Create(p, TweenInfo.new(0.4), {Transparency = 1}):Play() end
-                    end
-                    Debris:AddItem(d.Model, 0.5)
-                end
-            end
-            
-            if winnerDummy and winnerDummy.Model.PrimaryPart then
-                table.insert(winnerModels, winnerDummy.Model)
-                
-                -- Snap winner to tower position with a "Pop"
-                local targetCFrame = CFrame.new(towerPos.X, towerPos.Y + layer.Height, towerPos.Z)
-                
-                -- SFX & Flash per winner reveal (Staggered)
-                task.wait(CONFIG.RevealStagger)
-                
-                local res = results[i]
-                local flash = Instance.new("Part")
-                flash.Shape = Enum.PartType.Ball
-                flash.Size = Vector3.new(1,1,1)
-                flash.Material = Enum.Material.Neon
-                flash.Color = TIER_COLORS[res.resultTier] or Color3.new(1,1,1)
-                flash.Transparency = 0.5
-                flash.Anchored = true; flash.CanCollide = false
-                flash.Position = targetCFrame.Position
-                flash.Parent = workspace
-                
-                TweenService:Create(flash, TweenInfo.new(0.6), {Size = Vector3.new(30, 30, 30), Transparency = 1}):Play()
-                Debris:AddItem(flash, 0.7)
-                
-                -- Move winner to center
-                TweenService:Create(winnerDummy.Model.PrimaryPart, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                    CFrame = targetCFrame
-                }):Play()
-            end
-        end
-
-        task.wait(2) -- Let the user see the results
-
-        -- 5. FINAL PHASE: EQUIP winners and cleanup
-        for _, m in ipairs(winnerModels) do
-            if m and m.Parent then
-                -- Fade out ALL parts, not just PrimaryPart
-                for _, p in pairs(m:GetDescendants()) do
-                    if p:IsA("BasePart") then
-                        TweenService:Create(p, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                            Transparency = 1
-                        }):Play()
-                    end
-                end
-                
-                -- Tween size of primary part for "shrinking" effect
-                if m.PrimaryPart then
-                    TweenService:Create(m.PrimaryPart, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                        Size = Vector3.new(0,0,0)
-                    }):Play()
-                end
-                
-                Debris:AddItem(m, 0.5)
-            end
-        end
-        
-        -- Trigger equipment visual (local)
-        local lastResult = results[#results]
-        if lastResult and char then
-            local toolName = "Unit_" .. lastResult.resultName
-            local backpack = player:FindFirstChild("Backpack")
-            local tool = backpack and backpack:FindFirstChild(toolName)
-            if tool then
-                hum:EquipTool(tool)
-            end
-        end
-
-        task.wait(0.6)
     end)
 
-    if not success then
-        warn("[EggAnimation] CRITICAL ERROR during animation: " .. tostring(err))
-    end
+    -- Cleanup
+    Debris:AddItem(stage, 1.1)
     
-    cleanup()
+    CameraManager.unlock("EggOpening")
+    isAnimating = false
 end
 
+-- Event Listener
 EggOpenEvent.OnClientEvent:Connect(function(data)
+    print("[EggAnimation] Received Event:", data)
     if data and data.success then
         runEggOpeningAnimation(data)
+    else
+        warn("[EggAnimation] Failed:", data)
     end
 end)
 
-print("[EggAnimation] Roulette Gacha System Loaded")
+print("[EggAnimation] Hybrid Pop/Scroll System Loaded (Polished v6-SILHOUETTES)")

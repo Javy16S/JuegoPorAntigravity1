@@ -7,7 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 -- Require Module
 local ShopLogic = require(ServerScriptService:WaitForChild("ShopLogic"))
-local EconomyLogic = require(ReplicatedStorage:WaitForChild("EconomyLogic"))
+local EconomyLogic = require(ReplicatedStorage.Modules:WaitForChild("EconomyLogic"))
 local BrainrotData = require(ServerScriptService:WaitForChild("BrainrotData"))
 
 -- Create RemoteFunctions
@@ -100,13 +100,13 @@ local function handleSellAll(player)
         end
     end
     
-    print(string.format("[Shop] %s SOLD ALL (%d units) for $%d", player.Name, #inv, totalValue))
+    -- print(string.format("[Shop] %s SOLD ALL (%d units) for $%d", player.Name, #inv, totalValue))
     return {success = true, earned = totalValue}
 end
 
 -- 3. Sell Hand
 local function handleSellHand(player)
-    print("[Shop] handleSellHand called for " .. player.Name)
+    -- print("[Shop] handleSellHand called for " .. player.Name)
     
     local char = player.Character
     if not char then return {success = false} end
@@ -122,7 +122,7 @@ local function handleSellHand(player)
     local session = BrainrotData.getPlayerSession(player)
     local inv = session and session.AdvancedInventory or {}
     
-    print("[Shop] Looking for unitId: " .. tostring(unitId) .. " in " .. #inv .. " inventory items")
+    -- print("[Shop] Looking for unitId: " .. tostring(unitId) .. " in " .. #inv .. " inventory items")
     
     -- Find unit by ID
     local soldUnit = nil
@@ -148,7 +148,7 @@ local function handleSellHand(player)
         -- Remove Tool
         tool:Destroy()
         
-        print(string.format("[Shop] %s sold HAND (%s) for $%s (x%.1f mult)", player.Name, unitName, EconomyLogic.Abbreviate(val), soldUnit.ValueMultiplier or 1.0))
+        -- print(string.format("[Shop] %s sold HAND (%s) for $%s (x%.1f mult)", player.Name, unitName, EconomyLogic.Abbreviate(val), soldUnit.ValueMultiplier or 1.0))
         return {success = true, earned = val}
     else
         -- Unit tool exists but not in data? Calculate from attributes
@@ -168,7 +168,7 @@ local function handleSellHand(player)
         BrainrotData.addCash(player, val)
         tool:Destroy()
         
-        print(string.format("[Shop] %s sold UNSECURED HAND (%s) for $%s", player.Name, unitName, EconomyLogic.Abbreviate(val)))
+        -- print(string.format("[Shop] %s sold UNSECURED HAND (%s) for $%s", player.Name, unitName, EconomyLogic.Abbreviate(val)))
         return {success = true, earned = val}
     end
 end
@@ -183,7 +183,7 @@ local function handleGetInventory(player)
 end
 
 -- BIND
-purchaseFunc.OnServerInvoke = function(p, id) return ShopLogic.processPurchase(p, id) end
+purchaseFunc.OnServerInvoke = function(p, id, amount) return ShopLogic.processPurchase(p, id, amount) end
 sellFunc.OnServerInvoke = handleSellLegacy
 sellAllFunc.OnServerInvoke = handleSellAll
 sellHandFunc.OnServerInvoke = handleSellHand
@@ -196,13 +196,13 @@ getUpgradeFunc.OnServerInvoke = function(player)
         Price = ShopLogic.getSpeedPrice(level)
     }
 end
-inventoryFunc.OnServerInvoke = handleGetInventory
+-- inventoryFunc.OnServerInvoke = handleGetInventory -- Handled by BrainrotData
 
 -- 5. UPGRADE UNIT (Brainrot Leveling)
 local upgradeUnitFunc = ensureRemote("UpgradeUnit")
 
 local function handleUpgradeUnit(player, unitId)
-    print("[ShopBackend] Upgrade request for UnitId: " .. tostring(unitId))
+    -- print("[ShopBackend] Upgrade request for UnitId: " .. tostring(unitId))
     
     local session = BrainrotData.getPlayerSession(player)
     if not session then 
@@ -211,14 +211,14 @@ local function handleUpgradeUnit(player, unitId)
     end
     
     local inv = session.AdvancedInventory or {}
-    print("[ShopBackend] Inventory has " .. #inv .. " units. Searching...")
+    -- print("[ShopBackend] Inventory has " .. #inv .. " units. Searching...")
     
     local targetUnit = nil
     for i, u in ipairs(inv) do
-        print("[ShopBackend] Unit " .. i .. ": Id=" .. tostring(u.Id) .. " Name=" .. tostring(u.Name))
+        -- print("[ShopBackend] Unit " .. i .. ": Id=" .. tostring(u.Id) .. " Name=" .. tostring(u.Name))
         if u.Id == unitId then 
             targetUnit = u
-            print("[ShopBackend] MATCH FOUND at index " .. i)
+            -- print("[ShopBackend] MATCH FOUND at index " .. i)
             break 
         end
     end

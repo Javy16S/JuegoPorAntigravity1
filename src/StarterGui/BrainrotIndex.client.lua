@@ -5,14 +5,19 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UIManager = require(ReplicatedStorage.Modules:WaitForChild("UIManager"))
 
 local player = Players.LocalPlayer
+local MutationManager = nil
+pcall(function()
+    MutationManager = require(ReplicatedStorage:WaitForChild("Modules", 5):WaitForChild("MutationManager", 5))
+end)
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- Tier config (All 11 tiers - auto-detected from models)
 local TIER_ORDER = {
     "Common", "Rare", "Epic", "Legendary", "Mythic",
-    "Divine", "Celestial", "Cosmic", "Eternal", "Transcendent", "Infinite"
+    "Divine", "Celestial", "Eternal", "Cosmic", "Infinite", "Transcendent"
 }
 local TIER_COLORS = {
     -- Standard
@@ -31,6 +36,12 @@ local TIER_COLORS = {
     ["Infinite"] = Color3.fromRGB(50, 255, 150),
 }
 
+-- Forward declarations
+local fetchData
+local createDynamicTabs
+local populateGrid
+local onIndexOpen
+
 -- Prevent duplicates
 if playerGui:FindFirstChild("IndexMainGUI") then
     playerGui.IndexMainGUI:Destroy()
@@ -39,31 +50,32 @@ end
 -- Create UI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "IndexMainGUI"
-screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 10
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
--- Overlay for click-outside-to-close
+-- Background overlay
 local overlay = Instance.new("TextButton")
 overlay.Name = "Overlay"
 overlay.Size = UDim2.new(1, 0, 1, 0)
 overlay.BackgroundColor3 = Color3.new(0, 0, 0)
-overlay.BackgroundTransparency = 0.5
+overlay.BackgroundTransparency = 1
 overlay.Text = ""
 overlay.Visible = false
 overlay.ZIndex = 1
 overlay.Parent = screenGui
 
+-- MAIN CONTAINER
 local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0.8, 0, 0.85, 0)
-mainFrame.Position = UDim2.new(0.1, 0, 0.075, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
-mainFrame.BackgroundTransparency = 0.02
-mainFrame.Visible = false
-mainFrame.ZIndex = 10 -- High ZIndex
+mainFrame.Name = "IndexFrame"
+mainFrame.Size = UDim2.new(0.8, 0, 0.8, 0) -- Scaled size
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+mainFrame.BorderSizePixel = 0
+mainFrame.Visible = false -- START HIDDEN
+mainFrame.ZIndex = 2
 mainFrame.Parent = screenGui
 
 local mainCorner = Instance.new("UICorner")
@@ -75,26 +87,37 @@ mainStroke.Thickness = 3
 mainStroke.Color = Color3.fromRGB(0, 255, 100)
 mainStroke.Parent = mainFrame
 
--- Click overlay to close
-overlay.MouseButton1Click:Connect(function()
-    mainFrame.Visible = false
-    overlay.Visible = false
-end)
-
--- Forward declarations for functions defined later
-local fetchData
-local createDynamicTabs
-local populateGrid
-
--- Deferred: Connect visibility handler after functions are defined
-local function onIndexOpen()
-    overlay.Visible = mainFrame.Visible
-    if mainFrame.Visible then
+-- Toggle Logic
+local function toggleUI(state)
+    if state == nil then state = not mainFrame.Visible end
+    
+    if state then
+        mainFrame.Size = UDim2.new(0, 0, 0, 0)
+        mainFrame.Visible = true
+        overlay.Visible = true
+        TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back), {Size = UDim2.new(0.8, 0, 0.85, 0)}):Play()
+        TweenService:Create(overlay, TweenInfo.new(0.4), {BackgroundTransparency = 0.5}):Play()
+        
         fetchData()
         createDynamicTabs()
         populateGrid()
+    else
+        local t = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size = UDim2.new(0, 0, 0, 0)})
+        t:Play()
+        TweenService:Create(overlay, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+        t.Completed:Connect(function()
+            if UIManager.CurrentOpenUI ~= "IndexUI" then
+                mainFrame.Visible = false
+                overlay.Visible = false
+            end
+        end)
     end
 end
+
+-- Click overlay to close
+overlay.MouseButton1Click:Connect(function()
+    UIManager.Close("IndexUI")
+end)
 
 -- Title
 local title = Instance.new("TextLabel")
@@ -113,7 +136,7 @@ statsLabel.Name = "StatsLabel"
 statsLabel.Size = UDim2.new(1, 0, 0, 22)
 statsLabel.Position = UDim2.new(0, 0, 0, 48)
 statsLabel.BackgroundTransparency = 1
-statsLabel.Text = "Descubiertos: 0 / ?"
+statsLabel.Text = "Descubiertos: 0 / 0"
 statsLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
 statsLabel.Font = Enum.Font.Gotham
 statsLabel.TextSize = 14
@@ -136,9 +159,15 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 10)
 closeCorner.Parent = closeBtn
 
+closeBtn.Parent = mainFrame
+
 closeBtn.MouseButton1Click:Connect(function()
-    mainFrame.Visible = false
-    overlay.Visible = false
+    UIManager.Close("IndexUI")
+end)
+
+-- REGISTER WITH UIManager
+task.defer(function()
+    UIManager.Register("IndexUI", mainFrame, toggleUI)
 end)
 
 -- Tier Tabs
@@ -157,6 +186,7 @@ tabsLayout.FillDirection = Enum.FillDirection.Horizontal
 tabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 tabsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 tabsLayout.Padding = UDim.new(0, 6)
+tabsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 tabsLayout.Parent = tabsScroll
 
 local currentTier = "Common"
@@ -271,7 +301,7 @@ local allBrainrots = {}
 local discoveredBrainrots = {}
 
 -- Helper: Create ViewportFrame for 3D model
-local function createViewportModel(parent, modelName, tier, isDiscovered)
+local function createViewportModel(parent, modelName, tier, isDiscovered, isShiny)
     local viewport = Instance.new("ViewportFrame")
     viewport.Name = "Viewport"
     viewport.Size = UDim2.new(1, 0, 1, 0)
@@ -297,18 +327,29 @@ local function createViewportModel(parent, modelName, tier, isDiscovered)
             local model = tierFolder:FindFirstChild(modelName)
             if model then
                 local clone = model:Clone()
+                
+                -- CLEANUP
+                for _, v in pairs(clone:GetDescendants()) do
+                    if v:IsA("Script") or v:IsA("LocalScript") then v:Destroy() end
+                end
+
+                if isDiscovered and MutationManager then
+                    MutationManager.applyTierEffects(clone, tier, isShiny, true)
+                end
+                
                 clone.Parent = viewport
                 
                 -- Calculate bounds
                 local cf, size = clone:GetBoundingBox()
-                local maxSize = math.max(size.X, size.Y, size.Z)
-                local distance = maxSize * 1.5
                 
-                -- Center model
-                local modelCenter = cf.Position
+                -- FORCE CENTER TO (0,0,0)
+                -- We calculate the offset needed to move the center of the bounding box to 0,0,0
+                local centerOffset = -cf.Position
+                
+                -- Move every part by this offset
                 for _, part in pairs(clone:GetDescendants()) do
                     if part:IsA("BasePart") then
-                        part.CFrame = part.CFrame * CFrame.new(-modelCenter)
+                        part.CFrame = part.CFrame + centerOffset
                         
                         -- SILHOUETTE EFFECT for locked items
                         if not isDiscovered then
@@ -328,6 +369,13 @@ local function createViewportModel(parent, modelName, tier, isDiscovered)
                         end
                     end
                 end
+                
+                -- Recalculate camera distance based on max dimension (OUTLIER SAFE)
+                local maxSize = math.max(size.X, size.Y, size.Z)
+                if maxSize < 1 then maxSize = 2 end -- Min size safety
+                if maxSize > 50 then maxSize = 50 end -- Cap size for outliers (avoid camera flying away)
+                
+                local distance = maxSize * 1.2
                 
                 -- Camera
                 local camera = Instance.new("Camera")
@@ -470,7 +518,7 @@ local function createBrainrotCard(name, tier, isDiscovered, isShiny)
     previewFrame.ZIndex = 3
     previewFrame.Parent = card
     
-    createViewportModel(previewFrame, name, tier, isDiscovered)
+    createViewportModel(previewFrame, name, tier, isDiscovered, isShiny)
     
     -- Shiny badge
     if isShiny and isDiscovered then
@@ -608,20 +656,31 @@ fetchData = function()
         end
     end
     
-    -- Update stats
+    -- Update stats: Count only items that actually exist in the game
     local totalDiscovered = 0
     local totalPossible = 0
+    
     for tier, list in pairs(allBrainrots) do
-        totalPossible += #list -- Only count normal variants for now as main stat
-    end
-    for _ in pairs(discoveredBrainrots) do
-        totalDiscovered += 1
+        for _, item in ipairs(list) do
+            totalPossible += 1
+            
+            -- Check if this item is marked as discovered in player data
+            -- Try exact match key AND Tier key
+            local key1 = item.Name -- Legacy
+            local key2 = item.Name .. "_" .. tier -- Modern
+            local key3 = item.Name .. "_" .. tier .. "_SHINY" -- Shiny
+            
+            if discoveredBrainrots[key1] or discoveredBrainrots[key2] or discoveredBrainrots[key3] then
+                totalDiscovered += 1
+            end
+        end
     end
     
     statsLabel.Text = string.format("Descubiertos: %d / %d", totalDiscovered, totalPossible)
 end
 
 -- Connect the visibility handler now that all functions are defined
-mainFrame:GetPropertyChangedSignal("Visible"):Connect(onIndexOpen)
+-- Redundant now that toggleUI handles it, but kept for logic safety if changed
+-- mainFrame:GetPropertyChangedSignal("Visible"):Connect(onIndexOpen)
 
 print("[BrainrotIndex] Loaded with ViewportFrame support (Dynamic Tabs)")

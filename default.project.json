@@ -7,7 +7,7 @@
     },
     "ServerStorage": {
       "$path": "src/ServerStorage",
-      "Brainrot": {
+      "BrainrotModels": {
         "$path": "Modelos/Brainrots"
       },
       "BrainrotBase": {
@@ -23,11 +23,22 @@
     "ReplicatedStorage": {
       "$path": "src/shared"
     },
+    "ReplicatedFirst": {
+      "$path": "src/ReplicatedFirst"
+    },
     "Workspace": {
       "$className": "Workspace"
     },
     "StarterPlayer": {
-      "$path": "src/StarterPlayer"
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$path": "src/StarterPlayer/StarterPlayerScripts"
+      },
+      "StarterCharacterScripts": {
+        "$className": "StarterCharacterScripts",
+        "$path": "src/StarterPlayer/StarterCharacterScripts"
+      }
     }
   }
 }

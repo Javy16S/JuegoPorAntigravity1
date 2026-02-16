@@ -88,14 +88,15 @@ RunService.Heartbeat:Connect(function()
 	-- Smooth Lighting Transition DISABLED per User Request ("Quita la niebla")
     -- Can re-enable if needed for just particles later
     
-    -- Particles Logic Only
-    if alpha > 0.1 then
-        if not ashEmitter then
-            ashEmitter = createAshEmitter()
+    -- Particles
+        if alpha > 0.1 then
+            if not ashEmitter then
+                ashEmitter = createAshEmitter()
+            end
+            ashEmitter.Rate = 50 * alpha
+        elseif ashEmitter then
+            ashEmitter.Rate = 0
         end
-        ashEmitter.Rate = 50 * alpha
-    elseif ashEmitter then
-        ashEmitter.Rate = 0
     end
 end)
 

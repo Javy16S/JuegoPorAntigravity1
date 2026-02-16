@@ -35,17 +35,68 @@ local CRITERIA = {
         ["Ultra"] = 3.5,
         ["Supreme"] = 4.0,
         
-        -- SUPREME TIER KEYWORDS
+-- SUPREME TIER KEYWORDS
         ["Divine"] = 10.0,
         ["Celestial"] = 15.0,
-        ["Cosmic"] = 20.0,
         ["Eternal"] = 30.0,
-        ["Transcendent"] = 50.0,
-        ["Infinite"] = 100.0,
+        ["Cosmic"] = 60.0,
+        ["Infinite"] = 120.0,
+        ["Transcendent"] = 250.0,
         ["God"] = 25.0,
         ["Void"] = 20.0,
         ["Ascended"] = 18.0,
     }
+}
+
+-- MANUAL OVERRIDES (User requested specific classifications)
+local MANUAL_OVERRIDES = {
+    -- Mythic
+    ["Graipuss Medussi"] = "Mythic",
+    ["Blackhole Goat"] = "Mythic",
+    ["Frigo Camelo"] = "Mythic",
+
+    -- Divine
+    ["Strawberry Flamingelli"] = "Divine",
+    ["To To To Sahur"] = "Divine",
+    ["TungTungSahur"] = "Divine",
+
+    -- Celestial
+    ["La Spooky Grande"] = "Celestial",
+    ["Spaghetti Tualetti"] = "Celestial",
+    ["Glorbo Fruttodrillo"] = "Celestial",
+    ["Turtoginni Dragonfrutini"] = "Celestial",
+    ["Torrtuginni Dragonfrutini"] = "Celestial",
+    ["Pot Hotspot"] = "Celestial",
+
+    -- Eternal
+    ["Eviledon"] = "Eternal",
+    ["Piccione Macchina"] = "Eternal",
+    ["Los Crocodillitos"] = "Eternal",
+    ["La Vacca Saturno Saturnita"] = "Eternal",
+    ["La Vacca Jacko Linterino"] = "Eternal",
+    ["Los Hotspotsitos"] = "Eternal",
+    ["67"] = "Eternal",
+    ["Esok Sekolah"] = "Eternal",
+
+    -- Cosmic
+    ["Zombie Tralala"] = "Cosmic",
+    ["Strawberry Elephant"] = "Cosmic",
+    ["Frankentteo"] = "Cosmic",
+    ["Strawberrelli Flamingelli"] = "Cosmic",
+    ["Cavallo Virtuoso"] = "Cosmic",
+    ["Las Vaquitas Saturnitas"] = "Cosmic",
+    ["Los Tacoritas"] = "Cosmic",
+
+    -- Infinite
+    ["La Grande Combinasion"] = "Infinite",
+    ["Mariachi Corazoni"] = "Infinite",
+    ["Los Combinasionas"] = "Infinite",
+    ["Trenostuzzo Turbo 3000"] = "Infinite",
+
+    -- Transcendent
+    ["La Cucaracha"] = "Transcendent",
+    ["La Secret Combinacon"] = "Transcendent",
+    ["La Secret Combinasion"] = "Transcendent",
 }
 
 -- TIER THRESHOLDS (Score needed for each tier)
@@ -60,24 +111,24 @@ local TIERS = {
     -- SUPREME TIERS (Very high scores required)
     {Name = "Divine",       MinScore = 400},
     {Name = "Celestial",    MinScore = 700},
-    {Name = "Cosmic",       MinScore = 1000},
-    {Name = "Eternal",      MinScore = 1500},
-    {Name = "Transcendent", MinScore = 2500},
-    {Name = "Infinite",     MinScore = 5000},
+    {Name = "Eternal",      MinScore = 1200},
+    {Name = "Cosmic",       MinScore = 2000},
+    {Name = "Infinite",     MinScore = 4000},
+    {Name = "Transcendent", MinScore = 7000},
 }
 
 -- HELPER: Extraer nombre base normalizado (para agrupar variantes)
 local function extractBaseName(name)
     local base = name
-    -- Eliminar sufijos comunes de variantes
-    base = string.gsub(base, "%s*[vV]?%d+$", "") -- "v2", "2", " 2"
-    base = string.gsub(base, "%s*[Ss]hiny%s*", "") -- "Shiny", "shiny"
+    -- Eliminar sufijos comunes de variantes (solo si no es el nombre entero)
+    local temp = string.gsub(base, "%s*[vV]?%d+$", "")
+    if temp ~= "" then base = temp end
+    
+    base = string.gsub(base, "%s*[Ss]hiny%s*", "")
     base = string.gsub(base, "%s*[Vv]ariant%s*", "")
     base = string.gsub(base, "%s*[Cc]opy%s*", "")
-    base = string.gsub(base, "%s*%(%d+%)$", "") -- "(1)", "(2)"
-    base = string.gsub(base, "_+", " ") -- Guiones bajos a espacios
-    base = string.gsub(base, "%s+", " ") -- Espacios múltiples a uno
-    base = string.match(base, "^%s*(.-)%s*$") or base -- Trim
+    base = string.gsub(base, "%s*%(%d+%)$", "")
+    base = string.gsub(base, "[_%s]+", "")
     return string.lower(base)
 end
 
@@ -142,9 +193,43 @@ function Organizer.AnalyzeModel(model)
 end
 
 function Organizer.Run()
+    -- 0. MIGRATE PERSISTENT ASSETS (LuckyBlocks, Particles)
+    -- This prevents other cleanup scripts from deleting them from Workspace.
+    local persistentAssets = {"LuckyBlocks", "Particles"}
+    for _, assetName in ipairs(persistentAssets) do
+        local asset = Workspace:FindFirstChild(assetName)
+        if asset then
+            -- Move to ServerStorage if not already there
+            asset.Parent = ServerStorage
+            print("[Organizer] Safely migrated '" .. assetName .. "' to ServerStorage.")
+        end
+    end
+
+    -- 1. MIGRATE BASE PREFABS (Simple move as requested)
+    local basePrefabs = Workspace:FindFirstChild("BaseBrainrots")
+    if basePrefabs then
+        basePrefabs.Parent = ServerStorage
+        print("[Organizer] Migrated 'BaseBrainrots' to ServerStorage.")
+    end
+
     local sourceFolder = Workspace:FindFirstChild("Brainrots models")
-    if not sourceFolder then
-        warn("[Organizer] 'Brainrots models' folder not found in Workspace!")
+    local storageSource = ServerStorage:FindFirstChild("Brainrot") -- Old name if Rojo hasn't updated
+    
+    -- Cleanup legacy folder
+    local legacyFolder = ServerStorage:FindFirstChild("Brainrot")
+    if legacyFolder and destFolder and legacyFolder ~= destFolder then
+        -- If we have models inside, move them to sourceFolder for re-processing
+        for _, child in pairs(legacyFolder:GetDescendants()) do
+            if child:IsA("Model") then
+                child.Parent = sourceFolder or Workspace
+            end
+        end
+        legacyFolder:Destroy()
+        print("[Organizer] Cleaned up legacy 'Brainrot' folder.")
+    end
+
+    if not sourceFolder and not storageSource then
+        warn("[Organizer] No model sources found! Skipping unit organization.")
         return
     end
     
@@ -193,6 +278,46 @@ function Organizer.Run()
     local function collectModels(container)
         for _, child in pairs(container:GetChildren()) do
             if child:IsA("Model") then
+                -- VALIDATION: Ignore generic names and models without parts
+                local rawName = child.Name
+                local trimmedName = rawName:match("^%s*(.-)%s*$") or ""
+                local lowerName = string.lower(trimmedName)
+                local isInvalid = false
+                
+                -- Catch broader generic names and whitespace
+                if lowerName == "model" or lowerName == "part" or lowerName == "basepart" or lowerName == "meshpart" or 
+                   lowerName == "" or lowerName == "folder" or #trimmedName < 2 then
+                    isInvalid = true
+                end
+                
+                if not isInvalid then
+                    local hasParts = false
+                    for _, p in pairs(child:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            hasParts = true
+                            break
+                        end
+                    end
+                    if not hasParts then isInvalid = true end
+                end
+
+                -- PURGE: If it's already in an organized tier folder but invalid, move to _Deprecated
+                if isInvalid then
+                    if container.Parent == destFolder then
+                        local deprecatedFolder = destFolder:FindFirstChild("_Deprecated")
+                        if not deprecatedFolder then
+                            deprecatedFolder = Instance.new("Folder")
+                            deprecatedFolder.Name = "_Deprecated"
+                            deprecatedFolder.Parent = destFolder
+                        end
+                        if child.Parent ~= deprecatedFolder then
+                            print("[Organizer] PURGING invalid model from storage: '" .. rawName .. "'")
+                            child.Parent = deprecatedFolder
+                        end
+                    end
+                    continue
+                end
+
                 local score, notes = Organizer.AnalyzeModel(child)
                 local baseName = extractBaseName(child.Name)
                 local fingerprint = getModelFingerprint(child)
@@ -205,14 +330,20 @@ function Organizer.Run()
                     score = score,
                     notes = notes
                 })
-            elseif child:IsA("Folder") then
+            elseif child:IsA("Folder") and child.Name ~= "_Deprecated" then
                 collectModels(child) -- Recurse into folders
             end
         end
     end
     
     collectModels(sourceFolder)
-    print("[Organizer] Found " .. #allModels .. " models to analyze.")
+    
+    -- Also collect from STORAGE (Crucial for Rojo models)
+    if destFolder then
+        collectModels(destFolder)
+    end
+    
+    -- print("[Organizer] Found " .. #allModels .. " models to analyze.")
     
     -- 3. Group by baseName ONLY (if same name = same brainrot, regardless of structure)
     local groups = {} -- { "baseName" = { entries... } }
@@ -230,9 +361,9 @@ function Organizer.Run()
     local shinyCount = 0
     local deprecatedCount = 0
     
-    print("------------------------------------------------")
-    print("[Organizer] PROCESSING VARIANT GROUPS...")
-    print("------------------------------------------------")
+    -- print("------------------------------------------------")
+    -- print("[Organizer] PROCESSING VARIANT GROUPS...")
+    -- print("------------------------------------------------")
     
     for groupKey, entries in pairs(groups) do
         -- Sort by score (highest first)
@@ -241,7 +372,37 @@ function Organizer.Run()
         local primaryEntry = entries[1] -- Highest score = becomes the "definitive" version
         local model = primaryEntry.model
         
-        -- SANITIZE model
+        -- 1. Derive CLEAN NAME (Consistently used for renaming and overrides)
+        local displayBase = primaryEntry.originalName
+        local tempName = string.gsub(displayBase, "%s*[vV]?%d+$", "") -- remove "v2"
+        if tempName ~= "" then displayBase = tempName end
+        
+        displayBase = string.gsub(displayBase, "%s*[Ss]hiny%s*", "")
+        displayBase = string.gsub(displayBase, "%s*[Vv]ariant%s*", "")
+        displayBase = string.gsub(displayBase, "%s*[Cc]opy%s*", "")
+        displayBase = string.gsub(displayBase, "%s*%(%d+%)$", "")
+        displayBase = string.gsub(displayBase, "_+", " ") -- Underscores to spaces
+        
+        -- Capitalize Each Word
+        local cleanName = displayBase:gsub("(%w)(%w*)", function(first, rest)
+            return string.upper(first) .. rest
+        end)
+        cleanName = string.match(cleanName, "^%s*(.-)%s*$") or cleanName
+        
+        -- 2. Determine Tier (Check Override First, then Score)
+        local chosenTierName = MANUAL_OVERRIDES[cleanName]
+        if not chosenTierName then
+            local tier = TIERS[1]
+            for i = #TIERS, 1, -1 do
+                if primaryEntry.score >= TIERS[i].MinScore then
+                    tier = TIERS[i]
+                    break
+                end
+            end
+            chosenTierName = tier.Name
+        end
+        
+        -- 3. SANITIZE model
         for _, desc in pairs(model:GetDescendants()) do
             if desc:IsA("BasePart") then
                 desc.CanCollide = false
@@ -251,27 +412,23 @@ function Organizer.Run()
             end
         end
         
-        -- Determine Tier
-        local chosenTier = TIERS[1]
-        for i = #TIERS, 1, -1 do
-            if primaryEntry.score >= TIERS[i].MinScore then
-                chosenTier = TIERS[i]
-                break
+        -- Rename model to Clean Name
+        model.Name = cleanName
+        
+        -- 3.5 CLEANUP: Remove existing versions in other tiers to prevent duplicates
+        for _, folder in pairs(folders) do
+            local existing = folder:FindFirstChild(cleanName)
+            if existing and existing ~= model then
+                existing:Destroy()
             end
         end
-        
-        -- If there are variants (more than 1 entry), the highest is Shiny
+
+        -- 4. If there are variants (more than 1 entry), the highest is Shiny
         if #entries > 1 then
             model:SetAttribute("IsShiny", true)
             shinyCount = shinyCount + 1
             
-            -- Use a clean name (capitalize first letter of each word)
-            local cleanName = primaryEntry.baseName:gsub("(%a)([%w]*)", function(first, rest)
-                return string.upper(first) .. rest
-            end)
-            model.Name = cleanName
-            
-            print(string.format("✨ SHINY: '%s' (score: %d) from %d variants", cleanName, primaryEntry.score, #entries))
+            -- print(string.format("✨ SHINY: '%s' (Tier: %s, score: %d) from %d variants", cleanName, chosenTierName, primaryEntry.score, #entries))
             
             -- Move duplicates to _Deprecated
             for i = 2, #entries do
@@ -284,15 +441,21 @@ function Organizer.Run()
                 end
                 dupModel.Parent = deprecatedFolder
                 deprecatedCount = deprecatedCount + 1
-                print(string.format("   ❌ Deprecated: '%s' (score: %d)", entries[i].originalName, entries[i].score))
             end
         else
             -- Single model, no Shiny designation
             model:SetAttribute("IsShiny", false)
+            -- print(string.format("📦 NORMAL: '%s' (Tier: %s, score: %d)", cleanName, chosenTierName, primaryEntry.score))
         end
         
         -- Move to Storage
-        model.Parent = folders[chosenTier.Name]
+        local targetFolder = folders[chosenTierName]
+        if targetFolder then
+            model.Parent = targetFolder
+        else
+            warn("[Organizer] Missing folder for tier: " .. chosenTierName .. " (Model: " .. cleanName .. ")")
+            model.Parent = folders["Common"]
+        end
         movedCount = movedCount + 1
     end
     

@@ -10,7 +10,8 @@ local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
 
 local BrainrotData = require(game:GetService("ServerScriptService").BrainrotData)
-local EconomyLogic = require(game:GetService("ReplicatedStorage"):WaitForChild("EconomyLogic"))
+local EconomyLogic = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("EconomyLogic"))
+local MutationManager = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("MutationManager"))
 
 -- CONFIG (Updated for Short Zones)
 local ZONE_1_END = 180
@@ -247,7 +248,7 @@ local function getUnitsFromTiers(tierNames)
         local f = root:FindFirstChild(tName)
         if f then
             for _, child in pairs(f:GetChildren()) do
-                if child:IsA("Model") then table.insert(pool, child.Name) end
+                if child:IsA("Model") then table.insert(pool, child) end
             end
         end
     end
@@ -258,57 +259,49 @@ local function spawnUnitCapsule(pos, tier)
     activeUnits += 1
     
     local targetTiers = {tier}
-    local unitTypes = getUnitsFromTiers(targetTiers)
+    local unitPool = getUnitsFromTiers(targetTiers)
     
     -- Fallback if specific tier folder is empty
-    if #unitTypes == 0 then 
-        unitTypes = getUnitsFromTiers({"Common", "Rare"}) 
+    if #unitPool == 0 then 
+        unitPool = getUnitsFromTiers({"Common", "Rare"}) 
     end
-    if #unitTypes == 0 then unitTypes = {"Gattatino", "Skibidi"} end
     
-    local chosen = unitTypes[math.random(1, #unitTypes)]
-    local isSpecial = (tier ~= "Common")
-    
-    -- GENERATE VALUE MULTIPLIER AT SPAWN (So it's the same for UI and Tool)
-    local valueMult = EconomyLogic.generateValueMultiplier()
-    
-    -- Random Level 1-150
-    local level = math.random(1, 150)
+    if #unitPool == 0 then
+        -- Last resort fallback to first found unit if possible
+        local root = ServerStorage:FindFirstChild("BrainrotModels")
+        if root then unitPool = getUnitsFromTiers({"Common", "Rare", "Epic", "Legendary", "Mythic"}) end
+    end
 
-    -- FIND MODEL (Recursive)
-    local root = ServerStorage:FindFirstChild("BrainrotModels")
-    local modelTemplate = nil
-    if root then
-        for _, desc in pairs(root:GetDescendants()) do
-            if desc:IsA("Model") and desc.Name == chosen then
-                modelTemplate = desc
-                break
-            end
-        end
+    if #unitPool == 0 then return end -- Give up
+    
+    local modelTemplate = unitPool[math.random(1, #unitPool)]
+    local chosen = modelTemplate.Name
+    local realTier = modelTemplate.Parent and modelTemplate.Parent.Name or tier
+    local isSpecial = (realTier ~= "Common")
+    
+    -- GENERATE VALUE MULTIPLIER AT SPAWN
+    local valueMult = EconomyLogic.generateValueMultiplier()
+    local level = math.random(1, 150)
+    local mutationName = MutationManager.rollMutation()
+
+    local spawnedItem = modelTemplate:Clone()
+    
+    -- Setup PrimaryPart for positioning
+    if not spawnedItem.PrimaryPart then
+        local p = spawnedItem:FindFirstChildWhichIsA("BasePart")
+        if p then spawnedItem.PrimaryPart = p end
     end
     
-    local spawnedItem = nil
     local hitbox = nil
-    
-    if modelTemplate then
-        -- CLONE MODEL
-        spawnedItem = modelTemplate:Clone()
-        
-        -- Setup PrimaryPart for positioning
-        if not spawnedItem.PrimaryPart then
-            local p = spawnedItem:FindFirstChildWhichIsA("BasePart")
-            if p then spawnedItem.PrimaryPart = p end
-        end
-        
-        if spawnedItem.PrimaryPart then
-            -- Fix Floor Clipping: Get Height
-            local size = spawnedItem:GetExtentsSize()
-            local heightOffset = size.Y / 2
-            spawnedItem:SetPrimaryPartCFrame(CFrame.new(pos.X, pos.Y + 0.5 + heightOffset, pos.Z))
-        else
-            spawnedItem:Destroy()
-            return -- Abort if bad model
-        end
+    if spawnedItem.PrimaryPart then
+        -- Fix Floor Clipping: Get Height
+        local size = spawnedItem:GetExtentsSize()
+        local heightOffset = size.Y / 2
+        spawnedItem:SetPrimaryPartCFrame(CFrame.new(pos.X, pos.Y + 0.5 + heightOffset, pos.Z))
+    else
+        spawnedItem:Destroy()
+        return -- Abort if bad model
+    end
         
         -- HITBOX (For easier collection)
         hitbox = Instance.new("Part")
@@ -327,25 +320,13 @@ local function spawnUnitCapsule(pos, tier)
                 v.CanCollide = false 
             end
         end
-        
-    else
-        -- FALLBACK CAPSULE
-        spawnedItem = Instance.new("Part")
-        spawnedItem.Name = "UnitCapsule"
-        spawnedItem.Size = Vector3.new(4,4,4)
-        spawnedItem.Shape = Enum.PartType.Ball
-        spawnedItem.Material = Enum.Material.Neon
-        spawnedItem.Color = isSpecial and Color3.fromRGB(255, 0, 255) or Color3.fromRGB(0, 255, 255)
-        spawnedItem.Position = Vector3.new(pos.X, pos.Y + 1.5, pos.Z)
-        spawnedItem.Anchored = true
-        spawnedItem.CanCollide = false
-        
-        hitbox = spawnedItem -- Hitbox IS the part
+    
+    spawnedItem.Parent = workspace
+    
+    -- Apply Mutation Visuals (if any)
+    if mutationName then
+        MutationManager.applyMutation(spawnedItem, mutationName)
     end
-    
-    spawnedItem.Parent = workspace
-    
-    spawnedItem.Parent = workspace
     
     -- Visual Label Premium Design
     local realTier = "Common" 
@@ -357,13 +338,19 @@ local function spawnUnitCapsule(pos, tier)
     
     local tierColor = RARITY_COLORS[realTier] or RARITY_COLORS["Common"]
     -- Calculate income WITH the generated valueMultiplier
-    local baseIncome = calculateDeterministicIncome(chosen, realTier)
+    local baseIncome = calculateDeterministicIncome(chosen, realTier, level)
     local estIncome = math.floor(baseIncome * valueMult)
     
     -- Store valueMult in hitbox so tool creation can read it
     hitbox:SetAttribute("ValueMultiplier", valueMult)
     hitbox:SetAttribute("Tier", realTier)
+    -- Store valueMult in hitbox so tool creation can read it
+    hitbox:SetAttribute("ValueMultiplier", valueMult)
+    hitbox:SetAttribute("Tier", realTier)
     hitbox:SetAttribute("Level", level)
+    if mutationName then
+        hitbox:SetAttribute("Mutation", mutationName)
+    end
     
     -- SUPREME TIER VISUAL EFFECTS
     local SUPREME_TIERS = {
@@ -503,6 +490,27 @@ local function spawnUnitCapsule(pos, tier)
     lblName.TextScaled = true
     lblName.Parent = frame
     
+    -- Add Mutation Label if needed
+    if mutationName then
+        local lblMut = Instance.new("TextLabel")
+        lblMut.LayoutOrder = 1 -- Insert above Name? Or below? Let's put at bottom (order 4)
+        lblMut.Name = "MutationLabel"
+        lblMut.Size = UDim2.new(1, 0, 0.2, 0)
+        lblMut.BackgroundTransparency = 1
+        lblMut.Text = "☢ " .. mutationName .. " ☢"
+        -- Get mutation color
+        local mData = require(ReplicatedStorage.Modules.MutationDefinitions)[mutationName]
+        lblMut.TextColor3 = mData and mData.Color or Color3.new(1,1,1)
+        lblMut.Font = Enum.Font.GothamBlack
+        lblMut.TextScaled = true
+        lblMut.Parent = frame
+        
+        local sm = Instance.new("UIStroke")
+        sm.Thickness = 1.5
+        sm.Color = Color3.new(0,0,0)
+        sm.Parent = lblMut
+    end
+    
     local s1 = Instance.new("UIStroke")
     s1.Thickness = 1.5
     s1.Color = Color3.new(0,0,0)
@@ -593,7 +601,12 @@ local function spawnUnitCapsule(pos, tier)
         -- Create Tool (Temporary Loot) - READ ValueMultiplier from hitbox (generated at spawn)
         local spawnedValueMult = hitbox:GetAttribute("ValueMultiplier") or 1.0
         local spawnedLevel = hitbox:GetAttribute("Level") or level
-        local tool = BrainrotData.createUnitTool(chosen, realTier, false, nil, spawnedLevel, spawnedValueMult)
+        -- Create Tool (Temporary Loot) - READ ValueMultiplier from hitbox (generated at spawn)
+        local spawnedValueMult = hitbox:GetAttribute("ValueMultiplier") or 1.0
+        local spawnedLevel = hitbox:GetAttribute("Level") or level
+        local spawnedMutation = hitbox:GetAttribute("Mutation") -- Retrieve mutation
+        
+        local tool = BrainrotData.createUnitTool(chosen, realTier, false, nil, spawnedLevel, spawnedValueMult, spawnedMutation)
         tool.Parent = player.Backpack
         if character and character:FindFirstChild("Humanoid") then
             character.Humanoid:EquipTool(tool)
@@ -660,53 +673,72 @@ end
 task.spawn(function()
     setStatus("SURVIVE & LOOT!")
     
-    -- SLOP CONFIG FOR SPAWN CALCULATIONS
-    local SLOPE_START_Z = 120
-    local SLOPE_LENGTH = 1500 -- Reverted
+    -- SLOPE CONFIG FOR SPAWN CALCULATIONS
+    local SLOPE_START_Z = 75 -- SYNCED: Matches MapManager
+    local SLOPE_LENGTH = 1500 
+    local EVENT_SLOPE_LENGTH = 400 -- Must match MapManager
     local SLOPE_MAX_Z = SLOPE_START_Z + SLOPE_LENGTH
-    local SLOPE_WIDTH = 120
-    local SLOPE_ANGLE_RAD = math.rad(25) -- Synced with MapManager (was 35)
     
-    local MAX_ACTIVE_UNITS = 80 -- Balanced for shorter path
+    local SLOPE_WIDTH = 200 -- SYNCED: Was 120
+    local SLOPE_ANGLE_RAD = math.rad(25) 
+    
+    local MAX_ACTIVE_UNITS = _G.DoubleWaveActive and 160 or 80 -- Double cap during event
     
     while true do
-        -- 1. BRAINROT SPAWN (Progressive Difficulty)
-        if activeUnits < MAX_ACTIVE_UNITS then
-            local z = math.random(SLOPE_START_Z + 10, SLOPE_MAX_Z - 50)
-            local x = math.random(-SLOPE_WIDTH/2 + 20, SLOPE_WIDTH/2 - 20)
-            
-            -- Calculate Y based on slope angle
-            local y = (math.tan(SLOPE_ANGLE_RAD) * (z - SLOPE_START_Z)) + 2
-            local pos = Vector3.new(x, y, z)
-            
-            -- DEPTH-BASED RARITY SYSTEM
-            local distFactor = (z - SLOPE_START_Z) / SLOPE_LENGTH
-            local tier = "Common"
-            
-            if distFactor > 0.85 then
-                tier = (math.random() > 0.4) and "Mythic" or "Legendary"
-            elseif distFactor > 0.6 then
-                local rng = math.random()
-                tier = (rng > 0.7) and "Legendary" or ((rng > 0.3) and "Epic" or "Rare")
-            elseif distFactor > 0.3 then
-                local rng = math.random()
-                tier = (rng > 0.6) and "Epic" or ((rng > 0.3) and "Rare" or "Common")
-            elseif distFactor > 0.05 then
-                tier = (math.random() > 0.5) and "Rare" or "Common"
+        local iterations = _G.DoubleWaveActive and 2 or 1
+        
+        for i = 1, iterations do
+            -- 1. BRAINROT SPAWN
+            if activeUnits < MAX_ACTIVE_UNITS then
+                local z, x, y
+                local tier = "Common"
+                
+                if _G.DoubleWaveActive then
+                    -- EVENT SPAWN (In Special Zone only)
+                    z = math.random(SLOPE_MAX_Z + 10, SLOPE_MAX_Z + EVENT_SLOPE_LENGTH - 50)
+                    x = math.random(-SLOPE_WIDTH/2 + 20, SLOPE_WIDTH/2 - 20)
+                    -- Calculate Y for Event Slope (Same angle continued)
+                    y = (math.tan(SLOPE_ANGLE_RAD) * (z - SLOPE_START_Z)) + 2
+                    
+                    -- EVENT TIERS (Mythic+)
+                    local rng = math.random()
+                    tier = (rng > 0.9) and "Cosmic" or ((rng > 0.6) and "Celestial" or ((rng > 0.3) and "Divine" or "Mythic"))
+                else
+                    -- NORMAL SPAWN (Ramp Only)
+                    z = math.random(SLOPE_START_Z + 10, SLOPE_MAX_Z - 50)
+                    x = math.random(-SLOPE_WIDTH/2 + 20, SLOPE_WIDTH/2 - 20)
+                    y = (math.tan(SLOPE_ANGLE_RAD) * (z - SLOPE_START_Z)) + 2
+                    
+                    -- DEPTH-BASED RARITY
+                    local distFactor = (z - SLOPE_START_Z) / SLOPE_LENGTH
+                    if distFactor > 0.85 then
+                         tier = (math.random() > 0.4) and "Mythic" or "Legendary"
+                    elseif distFactor > 0.6 then
+                         local rng = math.random()
+                         tier = (rng > 0.7) and "Legendary" or ((rng > 0.3) and "Epic" or "Rare")
+                    elseif distFactor > 0.3 then
+                         local rng = math.random()
+                         tier = (rng > 0.6) and "Epic" or ((rng > 0.2) and "Rare" or "Common") -- Reduced Common to 20%
+                    elseif distFactor > 0.05 then
+                         tier = (math.random() > 0.4) and "Rare" or "Common" -- Rare 60%
+                    else
+                         tier = (math.random() > 0.8) and "Rare" or "Common" -- Very Start: Chance for Rare
+                    end
+                end
+
+                spawnUnitCapsule(Vector3.new(x, y, z), tier)
             end
             
-            spawnUnitCapsule(pos, tier)
+            -- 2. DISASTER SPAWN
+            if math.random() > 0.75 then
+                local rZ = _G.DoubleWaveActive and math.random(SLOPE_MAX_Z, SLOPE_MAX_Z + EVENT_SLOPE_LENGTH) or math.random(SLOPE_START_Z, SLOPE_MAX_Z)
+                local rX = math.random(-SLOPE_WIDTH/2, SLOPE_WIDTH/2)
+                local rY = (math.tan(SLOPE_ANGLE_RAD) * (rZ - SLOPE_START_Z)) + 120
+                spawnRockAt(Vector3.new(rX, rY, rZ))
+            end
         end
         
-        -- 2. DISASTER SPAWN (Slightly randomized along the slope)
-        if math.random() > 0.75 then
-            local rZ = math.random(SLOPE_START_Z, SLOPE_MAX_Z)
-            local rX = math.random(-SLOPE_WIDTH/2, SLOPE_WIDTH/2)
-            local rY = (math.tan(SLOPE_ANGLE_RAD) * (rZ - SLOPE_START_Z)) + 120
-            spawnRockAt(Vector3.new(rX, rY, rZ))
-        end
-        
-        task.wait(0.8) -- Slightly slower spawn rate for 1500m
+        task.wait(0.8) 
     end
 end)
 

@@ -3,7 +3,7 @@
 -- Description: Manages the overhead UI for units LOCALLY to ensure smooth buttons and instant updates.
 -- Replaces server-side UI.
 
-print("[UnitHUD] Script starting...")
+-- print("[UnitHUD] Script starting...")
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,13 +15,13 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- Require EconomyLogic with error handling
 local EconomyLogic
 local success, err = pcall(function()
-    EconomyLogic = require(ReplicatedStorage:WaitForChild("EconomyLogic", 10))
+    EconomyLogic = require(ReplicatedStorage.Modules:WaitForChild("EconomyLogic", 10))
 end)
 if not success then
     warn("[UnitHUD] Failed to load EconomyLogic: " .. tostring(err))
     return -- Exit script if module fails
 end
-print("[UnitHUD] EconomyLogic loaded.")
+-- print("[UnitHUD] EconomyLogic loaded.")
 
 -- Remote for Upgrading (optional, don't block if missing)
 local upgradeRemote = ReplicatedStorage:FindFirstChild("UpgradeUnit")
@@ -29,41 +29,80 @@ if not upgradeRemote then
     print("[UnitHUD] UpgradeUnit remote not found, waiting...")
     upgradeRemote = ReplicatedStorage:WaitForChild("UpgradeUnit", 10)
 end
-print("[UnitHUD] Upgrade remote: " .. tostring(upgradeRemote))
+-- print("[UnitHUD] Upgrade remote: " .. tostring(upgradeRemote))
+
+-- Load MutationDefinitions for color lookup
+local MutationDefinitions
+pcall(function()
+    MutationDefinitions = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MutationDefinitions", 5))
+end)
+if MutationDefinitions then
+    -- print("[UnitHUD] MutationDefinitions loaded.")
+else
+    print("[UnitHUD] MutationDefinitions not found, using fallback colors.")
+end
 
 -- UI CONSTANTS
 local UI_OFFSET = Vector3.new(0, 4.5, 0)
 local UI_SIZE = UDim2.new(5, 0, 3, 0) -- Scaled size
 
 local function createUnitUI(model)
-    if not model then 
-        warn("[UnitHUD] createUnitUI called with nil model")
-        return 
-    end
+    if not model then return end
     
-    -- Find the best part to attach the UI to
-    local adornee = model.PrimaryPart or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
+    -- Check if HUD already exists to avoid work
+    local hudName = "HUD_" .. model:GetFullName():gsub("[^%w]", "_")
+    if PlayerGui:FindFirstChild(hudName) then return end
+
+    -- Find Adornee efficiently
+    -- PrimaryPart is fastest. Fallback to child search only if needed.
+    local adornee = model.PrimaryPart
+    
     if not adornee then
-        warn("[UnitHUD] No valid BasePart found in model: " .. model.Name)
+        adornee = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart", true)
+    end
+
+    if not adornee then
+        -- Quick retry (max 1s) for streaming
+        local retries = 0
+        while retries < 2 and not adornee do
+            task.wait(0.5)
+            adornee = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+            retries += 1
+        end
+    end
+
+    if not adornee then
+        -- Silent fail for now, polling will catch it later if it streams in
         return
     end
-    
-    print("[UnitHUD] Creating UI for: " .. model.Name .. " (Adornee: " .. adornee.Name .. ")")
-    
-    -- Cleanup existing
-    local hudName = "HUD_" .. model:GetFullName():gsub("[^%w]", "_")
+
+    -- Cleanup existing (just in case)
     if PlayerGui:FindFirstChild(hudName) then
         PlayerGui[hudName]:Destroy()
-    end
+    end    
+    -- Creates Billboard in PlayerGui
+
     
-    -- Create Billboard in PlayerGui (Adornee pattern for reliable clicks)
+    -- Creates Billboard in PlayerGui (Adornee pattern for reliable clicks)
     local bb = Instance.new("BillboardGui")
     bb.Name = hudName
     bb.Adornee = adornee
     bb.Size = UI_SIZE
-    bb.StudsOffset = UI_OFFSET
+    
+    -- DYNAMIC HEIGHT OFFSET
+    local height = 4.5
+    if model:IsA("Model") then
+        local cf, size = model:GetBoundingBox()
+        if size.Y > 0 then
+            height = (size.Y / 2) + 3 -- Top of model + 3 studs
+        end
+    elseif model:IsA("BasePart") then
+        height = (model.Size.Y / 2) + 3
+    end
+    
+    bb.StudsOffset = Vector3.new(0, height, 0)
     bb.AlwaysOnTop = false -- Keep depth
-    bb.MaxDistance = 40
+    bb.MaxDistance = 60 -- Increased distance for big units
     bb.Parent = PlayerGui
     
     local frame = Instance.new("Frame")
@@ -101,7 +140,8 @@ local function createUnitUI(model)
     local lvlLbl = addText("Lv " .. (model:GetAttribute("Level") or 1), Color3.fromRGB(0, 255, 255), 1, 0.15, Enum.Font.FredokaOne)
     
     -- NAME Display
-    local nameStr = model:GetAttribute("UnitName") or model.Name
+    local rawName = model:GetAttribute("UnitName") or model.Name
+    local nameStr = rawName:gsub("_", " ") -- Force spaces for display
     local isShiny = model:GetAttribute("IsShiny")
     local nameColor = Color3.new(1,1,1)
     if isShiny then 
@@ -115,9 +155,20 @@ local function createUnitUI(model)
     local tColor = EconomyLogic.RARITY_COLORS[tier] or Color3.new(1,1,1)
     addText(string.upper(tier), tColor, 3, 0.2)
     
+    -- MUTATION (NEW)
+    local mutationLbl = nil
+    local mutationName = model:GetAttribute("Mutation")
+    if mutationName and mutationName ~= "" then
+        local mutColor = Color3.fromRGB(255, 100, 255) -- Fallback purple
+        if MutationDefinitions and MutationDefinitions[mutationName] then
+            mutColor = MutationDefinitions[mutationName].Color or mutColor
+        end
+        mutationLbl = addText("☢ " .. mutationName .. " ☢", mutColor, 4, 0.15, Enum.Font.GothamBold)
+    end
+    
     -- INCOME
     local incVal = model:GetAttribute("Income") or 0
-    local incLbl = addText("+$" .. EconomyLogic.Abbreviate(incVal) .. "/s", Color3.fromRGB(100, 255, 100), 4, 0.25)
+    local incLbl = addText("+$" .. EconomyLogic.Abbreviate(incVal) .. "/s", Color3.fromRGB(100, 255, 100), 5, 0.25)
     
     -- UPGRADE BUTTON REMOVED (User Request)
     -- Using 'F' ProximityPrompt instead.
@@ -139,6 +190,22 @@ local function createUnitUI(model)
     model:GetAttributeChangedSignal("Level"):Connect(update)
     model:GetAttributeChangedSignal("Income"):Connect(update)
     
+    -- Mutation listener (if mutation appears later)
+    model:GetAttributeChangedSignal("Mutation"):Connect(function()
+        local newMut = model:GetAttribute("Mutation")
+        if newMut and newMut ~= "" and not mutationLbl then
+            local mutColor = Color3.fromRGB(255, 100, 255)
+            if MutationDefinitions and MutationDefinitions[newMut] then
+                mutColor = MutationDefinitions[newMut].Color or mutColor
+            end
+            mutationLbl = addText("☢ " .. newMut .. " ☢", mutColor, 4, 0.15, Enum.Font.GothamBold)
+        elseif mutationLbl and newMut and MutationDefinitions then
+            local mutColor = MutationDefinitions[newMut] and MutationDefinitions[newMut].Color or Color3.fromRGB(255, 100, 255)
+            mutationLbl.Text = "☢ " .. newMut .. " ☢"
+            mutationLbl.TextColor3 = mutColor
+        end
+    end)
+    
     -- Destroy handler
     model.AncestryChanged:Connect(function(_, parent)
         if not parent then
@@ -148,18 +215,47 @@ local function createUnitUI(model)
 end
 
 local function onUnitAdded(model)
-    task.wait(0.5) -- Wait for attributes
+    -- print("[UnitHUD] Signal Received for: " .. model.Name)
+    -- task.wait(0.1) -- Minimal yield to allow properties to replicate
     createUnitUI(model)
 end
 
 CollectionService:GetInstanceAddedSignal("BrainrotUnit"):Connect(onUnitAdded)
 
 local existingUnits = CollectionService:GetTagged("BrainrotUnit")
-print("[UnitHUD] Found " .. #existingUnits .. " existing BrainrotUnit(s)")
+-- print("[UnitHUD] Found " .. #existingUnits .. " existing BrainrotUnit(s)")
 
 for _, unit in pairs(existingUnits) do
-    print("[UnitHUD] Processing existing unit: " .. tostring(unit.Name))
+--    print("[UnitHUD] Processing existing unit: " .. tostring(unit.Name))
     onUnitAdded(unit)
 end
 
-print("[UnitHUD] Client UI System Ready.")
+-- FALLBACK POLLING (Fixes replication timing issues)
+task.spawn(function()
+    while true do
+        task.wait(5)
+        local units = CollectionService:GetTagged("BrainrotUnit")
+        for _, u in pairs(units) do
+             local hudName = "HUD_" .. u:GetFullName():gsub("[^%w]", "_")
+             if not PlayerGui:FindFirstChild(hudName) then
+--                 print("[UnitHUD] Polling found missed unit: " .. u.Name)
+                 onUnitAdded(u)
+             end
+        end
+    end
+end)
+
+-- DEBUG: Monitor Workspace for ANY unit spawning
+workspace.DescendantAdded:Connect(function(desc)
+    if desc.Name == "Unit_Spawned" then
+--        print("[UnitHUD] DEBUG: Unit_Spawned appeared in Workspace at " .. desc:GetFullName())
+--        -- Check if it has tag
+--        if CollectionService:HasTag(desc, "BrainrotUnit") then
+--            print("[UnitHUD] DEBUG: ...and it has the Tag.")
+--        else
+--            warn("[UnitHUD] DEBUG: ...but it MISSES the BrainrotUnit tag!")
+--        end
+    end
+end)
+
+-- print("[UnitHUD] Client UI System Ready.")

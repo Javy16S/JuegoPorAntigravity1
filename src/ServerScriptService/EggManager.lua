@@ -1,3 +1,4 @@
+--!strict
 -- EggManager.lua
 -- Skill: gacha-mechanics
 -- Description: Server-side logic for Egg opening with 3D world animation.
@@ -9,6 +10,27 @@ local Players = game:GetService("Players")
 
 local EggData = require(ServerScriptService:WaitForChild("EggData"))
 local BrainrotData = require(ServerScriptService:WaitForChild("BrainrotData"))
+local MutationManager = require(ReplicatedStorage.Modules:WaitForChild("MutationManager"))
+local EconomyLogic = require(ReplicatedStorage.Modules:WaitForChild("EconomyLogic"))
+
+export type Unit = EconomyLogic.Unit
+
+export type EggResult = {
+    unitData: Unit,
+    resultName: string,
+    resultTier: string,
+    isShiny: boolean,
+    vfx: string?
+}
+
+export type MultiOpenResult = {
+    success: boolean,
+    eggId: string?,
+    results: {EggResult}?,
+    possibilities: {any}?,
+    amount: number?,
+    error: string?
+}
 
 local EggManager = {}
 
@@ -21,7 +43,7 @@ if not EggOpenEvent then
 end
 
 -- Get all available brainrots from a tier folder
-function EggManager.getModelsFromTier(tier)
+function EggManager.getModelsFromTier(tier: string): {string}
     local brainrotFolder = ServerStorage:FindFirstChild("BrainrotModels")
     if not brainrotFolder then return {} end
     
@@ -39,7 +61,7 @@ function EggManager.getModelsFromTier(tier)
 end
 
 -- Get random model from a tier
-function EggManager.getRandomModelFromTier(tier)
+function EggManager.getRandomModelFromTier(tier: string): string
     local models = EggManager.getModelsFromTier(tier)
     if #models == 0 then
         warn("[EggManager] No models found in tier: " .. tier)
@@ -49,7 +71,7 @@ function EggManager.getRandomModelFromTier(tier)
 end
 
 -- Get pool of possible results for animation
-function EggManager.getPossibilities(eggId)
+function EggManager.getPossibilities(eggId: string): {any}
     local egg = EggData.EGGS[eggId]
     if not egg then return {} end
     
@@ -77,7 +99,7 @@ function EggManager.getPossibilities(eggId)
 end
 
 -- Main egg opening function
-function EggManager.openEgg(player, eggId, amount)
+function EggManager.openEgg(player: Player, eggId: string, amount: number?): MultiOpenResult
     amount = math.clamp(amount or 1, 1, 8) -- Limit to 8 for performance/UX
     
     -- 1. Validate egg exists
@@ -105,8 +127,14 @@ function EggManager.openEgg(player, eggId, amount)
         -- 5. Roll for Shiny
         local isShiny = math.random() < EggData.SHINY_CHANCE
         
-        -- 6. Add to advanced inventory
-        local unitData = BrainrotData.addUnitAdvanced(player, wonModel, wonTier, isShiny)
+        -- 6. Roll for Mutation (New Feature)
+        local mutation = nil
+        if math.random() < 0.3 then -- 30% Mutation Chance in Eggs
+             mutation = MutationManager.rollMutation()
+        end
+
+        -- 7. Add to advanced inventory
+        local unitData = BrainrotData.addUnitAdvanced(player, wonModel, wonTier, isShiny, false, 1, nil, nil, mutation)
         
         -- 7. Increment stats
         BrainrotData.incrementEggsOpened(player)
@@ -138,7 +166,7 @@ function EggManager.openEgg(player, eggId, amount)
 end
 
 -- Initialize egg pedestals in the world
-function EggManager.setupEggPedestal(pedestal, eggId)
+function EggManager.setupEggPedestal(pedestal: Model, eggId: string)
     if not pedestal then return end
     
     local egg = EggData.EGGS[eggId]

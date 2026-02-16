@@ -7,7 +7,7 @@ local EggData = {}
 -- Tier order for reference (11 tiers total)
 EggData.TIER_ORDER = {
     "Common", "Rare", "Epic", "Legendary", "Mythic",
-    "Divine", "Celestial", "Cosmic", "Eternal", "Transcendent", "Infinite"
+    "Divine", "Celestial", "Eternal", "Cosmic", "Infinite", "Transcendent"
 }
 
 -- Shiny chance (applies to all eggs)
@@ -64,7 +64,7 @@ EggData.EGGS = {
             Mythic = 0.50,     -- 50%
             Divine = 0.35,     -- 35%
             Celestial = 0.12,  -- 12%
-            Cosmic = 0.03      -- 3%
+            Eternal = 0.03     -- 3%
         },
         EggColor = Color3.fromRGB(200, 100, 255),
         GlowColor = Color3.fromRGB(150, 50, 200)
@@ -75,10 +75,10 @@ EggData.EGGS = {
         DisplayName = "∞ Infinite Egg ∞",
         Description = "El huevo definitivo. Poder sin límites.",
         Chances = {
-            Cosmic = 0.50,        -- 50%
-            Eternal = 0.30,       -- 30%
-            Transcendent = 0.15,  -- 15%
-            Infinite = 0.05       -- 5%
+            Eternal = 0.50,       -- 50%
+            Cosmic = 0.30,        -- 30%
+            Infinite = 0.15,      -- 15%
+            Transcendent = 0.05   -- 5%
         },
         EggColor = Color3.fromRGB(50, 255, 150),
         GlowColor = Color3.fromRGB(0, 200, 100)
@@ -140,26 +140,26 @@ EggData.TIER_VFX = {
         SoundId = "rbxassetid://138090593",
         ExtraDelay = 3.0
     },
-    ["Cosmic"] = {
-        ParticleColor = Color3.fromRGB(200, 100, 255),
+    ["Eternal"] = {
+        ParticleColor = Color3.fromRGB(255, 255, 255),
         ParticleCount = 800,
         SoundId = "rbxassetid://138090593",
         ExtraDelay = 3.5
     },
-    ["Eternal"] = {
-        ParticleColor = Color3.fromRGB(255, 255, 255),
+    ["Cosmic"] = {
+        ParticleColor = Color3.fromRGB(200, 100, 255),
         ParticleCount = 1000,
         SoundId = "rbxassetid://138090593",
         ExtraDelay = 4.0
     },
-    ["Transcendent"] = {
-        ParticleColor = Color3.fromRGB(255, 100, 200),
+    ["Infinite"] = {
+        ParticleColor = Color3.fromRGB(50, 255, 150),
         ParticleCount = 1500,
         SoundId = "rbxassetid://138090593",
         ExtraDelay = 5.0
     },
-    ["Infinite"] = {
-        ParticleColor = Color3.fromRGB(50, 255, 150),
+    ["Transcendent"] = {
+        ParticleColor = Color3.fromRGB(255, 100, 200),
         ParticleCount = 2000,
         SoundId = "rbxassetid://138090593",
         ExtraDelay = 6.0  -- Maximum suspense!

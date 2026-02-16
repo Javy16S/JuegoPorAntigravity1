@@ -7,9 +7,9 @@ for _, c in pairs(ReplicatedStorage:GetChildren()) do
     print(" - " .. c.Name .. " (".. c.ClassName ..")")
 end
 
-if ReplicatedStorage:FindFirstChild("EconomyLogic") then
-    print("SUCCESS: EconomyLogic found in ReplicatedStorage.")
-    local status, result = pcall(require, ReplicatedStorage.EconomyLogic)
+if ReplicatedStorage:WaitForChild("Modules"):FindFirstChild("EconomyLogic") then
+    print("SUCCESS: EconomyLogic found in ReplicatedStorage.Modules.")
+    local status, result = pcall(require, ReplicatedStorage.Modules.EconomyLogic)
     if status then
         print("SUCCESS: EconomyLogic required successfully.")
     else
